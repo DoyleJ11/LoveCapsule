@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "TimeCapsule Diary",
+    "slug": "timecapsule-diary",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "timecapsule",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a2e"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.timecapsule.diary",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Take photos for your diary entries",
+        "NSPhotoLibraryUsageDescription": "Choose photos for your diary entries",
+        "NSLocationWhenInUseUsageDescription": "Add locations to your diary entries"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#e07a5f"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow TimeCapsule to access your photos for diary entries",
+          "cameraPermission": "Allow TimeCapsule to use the camera for diary entries"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow TimeCapsule to use your location for diary entries"
+        }
+      ],
+      "@react-native-community/datetimepicker"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
