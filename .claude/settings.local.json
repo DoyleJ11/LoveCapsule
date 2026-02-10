@@ -13,7 +13,8 @@
       "Bash(npm run validate:*)",
       "Bash(npm test:*)",
       "Bash(npx tsc:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(npm run test:ci:*)"
     ]
   }
 }
