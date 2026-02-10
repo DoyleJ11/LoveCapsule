@@ -16,6 +16,7 @@
       "Bash(ls:*)",
       "Bash(npm run test:ci:*)",
       "Bash(git checkout:*)"
+      "Bash(npm run test:ci:*)"
     ]
   }
 }
