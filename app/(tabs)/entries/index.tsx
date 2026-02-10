@@ -1,12 +1,6 @@
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  useColorScheme,
-} from 'react-native';
-import { useRouter } from 'expo-router';
+import { useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, useColorScheme } from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { useCouple } from '../../../src/hooks/useCouple';
@@ -73,6 +67,13 @@ export default function EntriesListScreen() {
   const colors = Colors[colorScheme ?? 'light'];
 
   const loading = coupleLoading || entriesLoading;
+
+  // Auto-refresh entries when the screen gains focus (e.g., after creating/editing/deleting)
+  useFocusEffect(
+    useCallback(() => {
+      if (couple?.id) refresh();
+    }, [couple?.id, refresh])
+  );
 
   if (!couple) {
     return (

@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from './supabase';
 
@@ -24,21 +24,15 @@ export async function uploadMedia(
 ): Promise<string> {
   const storagePath = `${userId}/${entryId}/${fileName}`;
 
-  const fileInfo = await FileSystem.getInfoAsync(localUri);
-  if (!fileInfo.exists) throw new Error('File does not exist');
+  const file = new File(localUri);
+  if (!file.exists) throw new Error('File does not exist');
 
-  const base64 = await FileSystem.readAsStringAsync(localUri, {
-    encoding: 'base64' as any,
+  const bytes = await file.bytes();
+
+  const { error } = await supabase.storage.from(BUCKET).upload(storagePath, bytes, {
+    contentType: mimeType,
+    upsert: true,
   });
-
-  const byteArray = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(storagePath, byteArray, {
-      contentType: mimeType,
-      upsert: true,
-    });
 
   if (error) throw error;
 

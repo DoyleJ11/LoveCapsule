@@ -52,6 +52,71 @@ export interface Media {
   created_at: string;
 }
 
+// ============================================
+// Checkpoint Types
+// ============================================
+export type CheckpointFrequency = 'monthly' | 'quarterly' | 'semi_annual' | 'specific_date';
+
+export interface CheckpointConfig {
+  id: string;
+  couple_id: string;
+  frequency: CheckpointFrequency;
+  day_of_month: number | null;
+  months: number[] | null;
+  specific_date: string | null;
+  label: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface CheckpointReveal {
+  id: string;
+  couple_id: string;
+  checkpoint_config_id: string | null;
+  entry_id: string;
+  revealed_to_user_id: string;
+  checkpoint_date: string;
+  revealed_at: string;
+}
+
+export interface CheckpointEntryResponse {
+  entry: Entry | null;
+  already_revealed: boolean;
+  no_entries: boolean;
+  error?: string;
+}
+
+export interface CheckpointHistoryItem {
+  id: string;
+  checkpoint_date: string;
+  revealed_at: string;
+  config_label: string | null;
+  entry: {
+    id: string;
+    title: string;
+    content_plain: string;
+    word_count: number;
+    mood: string | null;
+    entry_date: string;
+    location_name: string | null;
+  };
+}
+
+export interface CheckpointTodayResponse {
+  is_checkpoint_day: boolean;
+  checkpoints: {
+    id: string;
+    frequency: CheckpointFrequency;
+    label: string | null;
+    day_of_month: number | null;
+    months: number[] | null;
+    specific_date: string | null;
+  }[];
+}
+
+// ============================================
+// Reveal Stats Types
+// ============================================
 export interface RevealStats {
   partner_1_id: string;
   partner_2_id: string;
@@ -78,12 +143,12 @@ export interface RevealStats {
   last_entry_date: string;
   partner_1_favorite_dow: string;
   partner_2_favorite_dow: string;
-  locations: Array<{
+  locations: {
     lat: number;
     lng: number;
     location_name: string;
     author_id: string;
     entry_date: string;
-  }>;
+  }[];
   unique_location_count: number;
 }

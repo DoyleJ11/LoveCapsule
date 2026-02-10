@@ -1,20 +1,18 @@
 import { supabase } from './supabase';
 
 export async function signUp(email: string, password: string, displayName: string) {
+  // Pass display_name via user metadata — a database trigger on auth.users
+  // will automatically create the profiles row using this value.
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password,
+    options: {
+      data: { display_name: displayName },
+    },
   });
 
   if (authError) throw authError;
   if (!authData.user) throw new Error('Sign up failed');
-
-  const { error: profileError } = await supabase.from('profiles').insert({
-    id: authData.user.id,
-    display_name: displayName,
-  });
-
-  if (profileError) throw profileError;
 
   return authData;
 }
