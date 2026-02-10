@@ -13,6 +13,7 @@ import {
   useColorScheme,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../../src/lib/supabase';
@@ -39,6 +40,8 @@ export default function EntryDetailScreen() {
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
+  const [editEntryDate, setEditEntryDate] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   useEffect(() => {
     fetchEntry();
@@ -56,6 +59,7 @@ export default function EntryDetailScreen() {
     setEntry(data);
     setEditTitle(data.title);
     setEditContent(data.content_plain);
+    setEditEntryDate(data.entry_date);
     setLoading(false);
     fetchMedia(data.id);
   };
@@ -171,6 +175,7 @@ export default function EntryDetailScreen() {
         content_html: `<p>${editContent.replace(/\n/g, '</p><p>')}</p>`,
         content_plain: editContent,
         word_count: editContent.trim() ? editContent.trim().split(/\s+/).length : 0,
+        entry_date: editEntryDate,
       });
       await fetchEntry();
       setEditing(false);
@@ -250,6 +255,36 @@ export default function EntryDetailScreen() {
       {/* Title & Content */}
       {editing ? (
         <>
+          {/* Date Selector */}
+          <TouchableOpacity
+            style={styles.datePickerRow}
+            onPress={() => setShowDatePicker(!showDatePicker)}
+          >
+            <FontAwesome name="calendar" size={14} color={colors.primary} />
+            <Text style={[styles.datePickerText, { color: colors.text }]}>
+              {formatEntryDate(editEntryDate)}
+            </Text>
+            <FontAwesome
+              name={showDatePicker ? 'chevron-up' : 'chevron-down'}
+              size={10}
+              color={colors.textMuted}
+            />
+          </TouchableOpacity>
+          {showDatePicker && (
+            <DateTimePicker
+              value={new Date(editEntryDate + 'T12:00:00')}
+              mode="date"
+              display="inline"
+              maximumDate={new Date()}
+              onChange={(_: unknown, selectedDate?: Date) => {
+                if (Platform.OS === 'android') setShowDatePicker(false);
+                if (selectedDate) {
+                  setEditEntryDate(selectedDate.toISOString().split('T')[0]);
+                }
+              }}
+            />
+          )}
+
           <TextInput
             style={[styles.editTitle, { color: colors.text, borderBottomColor: colors.border }]}
             value={editTitle}
@@ -306,6 +341,8 @@ export default function EntryDetailScreen() {
               onPress={() => {
                 setEditTitle(entry.title);
                 setEditContent(entry.content_plain);
+                setEditEntryDate(entry.entry_date);
+                setShowDatePicker(false);
                 setEditing(false);
               }}
             >
@@ -478,6 +515,16 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   addImageText: {
+    fontSize: FontSize.sm,
+    fontWeight: '500',
+  },
+  datePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  datePickerText: {
     fontSize: FontSize.sm,
     fontWeight: '500',
   },
