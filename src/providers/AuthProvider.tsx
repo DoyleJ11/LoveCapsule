@@ -24,13 +24,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    setProfile(data);
+  const fetchProfile = async (userId: string, userMeta?: Record<string, any>) => {
+    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+
+    if (data) {
+      setProfile(data);
+    } else {
+      // Profile is missing (user signed up before the DB trigger existed).
+      // Create it now so the rest of the app works.
+      const displayName = userMeta?.display_name || userMeta?.full_name || 'User';
+      const { data: newProfile } = await supabase
+        .from('profiles')
+        .insert({ id: userId, display_name: displayName })
+        .select()
+        .single();
+      setProfile(newProfile);
+    }
   };
 
   const refreshProfile = async () => {
@@ -43,7 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       setSession(s);
       if (s?.user?.id) {
-        fetchProfile(s.user.id);
+        fetchProfile(s.user.id, s.user.user_metadata);
       }
       setLoading(false);
     });
@@ -53,7 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       if (s?.user?.id) {
-        fetchProfile(s.user.id);
+        fetchProfile(s.user.id, s.user.user_metadata);
       } else {
         setProfile(null);
       }

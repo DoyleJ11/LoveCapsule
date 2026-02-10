@@ -35,8 +35,12 @@ export default function SignUpScreen() {
 
     setLoading(true);
     try {
-      await signUp(email.trim(), password, displayName.trim());
-      Alert.alert('Success', 'Account created! Check your email to verify.');
+      const result = await signUp(email.trim(), password, displayName.trim());
+      if (result.session) {
+        // Auto-confirmed — AuthProvider will handle redirect
+      } else {
+        Alert.alert('Success', 'Account created! Please check your email to verify.');
+      }
     } catch (e: any) {
       Alert.alert('Sign Up Failed', e.message);
     } finally {
@@ -111,9 +115,7 @@ export default function SignUpScreen() {
             onPress={handleSignUp}
             disabled={loading}
           >
-            <Text style={styles.buttonText}>
-              {loading ? 'Creating account...' : 'Sign Up'}
-            </Text>
+            <Text style={styles.buttonText}>{loading ? 'Creating account...' : 'Sign Up'}</Text>
           </TouchableOpacity>
 
           <Link href="/(auth)/sign-in" asChild>

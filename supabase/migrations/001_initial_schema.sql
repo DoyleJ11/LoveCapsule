@@ -34,6 +34,26 @@ CREATE POLICY "Users can insert own profile"
   ON public.profiles FOR INSERT
   WITH CHECK (auth.uid() = id);
 
+-- Auto-create a profile row when a new user signs up.
+-- Runs as SECURITY DEFINER to bypass RLS (the user may not
+-- have an active session yet if email confirmation is enabled).
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, display_name)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'display_name', 'User')
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_new_user();
+
 -- ============================================
 -- COUPLES
 -- ============================================
@@ -56,6 +76,14 @@ CREATE POLICY "Couple members can view"
   ON public.couples FOR SELECT
   USING (partner_1_id = auth.uid() OR partner_2_id = auth.uid());
 
+-- Any authenticated user can see couples that are still open (waiting for
+-- a partner). This is required so that the JOIN update query can find the
+-- row by invite_code. The only "secret" is the invite code itself, which
+-- the joining user already possesses.
+CREATE POLICY "Anyone can view open couples"
+  ON public.couples FOR SELECT
+  USING (partner_2_id IS NULL);
+
 CREATE POLICY "Authenticated users can create couples"
   ON public.couples FOR INSERT
   WITH CHECK (partner_1_id = auth.uid());
@@ -64,11 +92,18 @@ CREATE POLICY "Couple members can update"
   ON public.couples FOR UPDATE
   USING (partner_1_id = auth.uid() OR partner_2_id = auth.uid());
 
--- Allow joining a couple by invite code (partner_2_id is null)
+-- Allow joining a couple by invite code (partner_2_id is null).
+-- USING: the row must currently have no partner_2.
+-- WITH CHECK: the new partner_2 must be the requesting user.
 CREATE POLICY "Users can join a couple"
   ON public.couples FOR UPDATE
   USING (partner_2_id IS NULL)
   WITH CHECK (partner_2_id = auth.uid());
+
+-- Allow the creator to delete their empty couple (no partner joined yet).
+CREATE POLICY "Creator can delete empty couple"
+  ON public.couples FOR DELETE
+  USING (partner_1_id = auth.uid() AND partner_2_id IS NULL);
 
 -- ============================================
 -- ENTRIES
@@ -179,6 +214,21 @@ CREATE POLICY "Users can delete own media"
   USING (
     bucket_id = 'entry-media'
     AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Partners can view each other's files (avatars, and entry media after reveal).
+CREATE POLICY "Partners can view each other's media"
+  ON storage.objects FOR SELECT
+  USING (
+    bucket_id = 'entry-media'
+    AND EXISTS (
+      SELECT 1 FROM public.couples
+      WHERE (
+        (partner_1_id = auth.uid() AND partner_2_id::text = (storage.foldername(name))[1])
+        OR
+        (partner_2_id = auth.uid() AND partner_1_id::text = (storage.foldername(name))[1])
+      )
+    )
   );
 
 -- ============================================

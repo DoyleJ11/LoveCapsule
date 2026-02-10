@@ -14,7 +14,14 @@ export default function EntriesLayout() {
       }}
     >
       <Stack.Screen name="index" options={{ title: 'My Diary' }} />
-      <Stack.Screen name="new" options={{ title: 'New Entry', presentation: 'modal' }} />
+      <Stack.Screen
+        name="new"
+        options={{
+          title: 'New Entry',
+          presentation: 'modal',
+          gestureDirection: 'vertical',
+        }}
+      />
       <Stack.Screen name="[id]" options={{ title: 'Entry' }} />
     </Stack>
   );

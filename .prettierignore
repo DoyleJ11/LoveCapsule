@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+.expo/
+
+# Coverage
+coverage/
+
+# Generated files
+*.lock
+package-lock.json
+
+# Assets
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+
+# Misc
+.DS_Store
+*.log

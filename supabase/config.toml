@@ -350,6 +350,14 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+# Edge Functions — skip gateway JWT verification for functions that use
+# the service-role key internally to perform privileged operations.
+[functions.check-anniversary]
+verify_jwt = false
+
+[functions.notify-partner]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

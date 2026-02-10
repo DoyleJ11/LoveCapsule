@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "TimeCapsule Diary",
+    "name": "LoveCapsule",
     "slug": "timecapsule-diary",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "timecapsule",
+    "scheme": "lovecapsule",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -19,7 +19,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Take photos for your diary entries",
         "NSPhotoLibraryUsageDescription": "Choose photos for your diary entries",
-        "NSLocationWhenInUseUsageDescription": "Add locations to your diary entries"
+        "NSLocationWhenInUseUsageDescription": "Add locations to your diary entries",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "plugins": [
@@ -34,20 +35,26 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow TimeCapsule to access your photos for diary entries",
-          "cameraPermission": "Allow TimeCapsule to use the camera for diary entries"
+          "photosPermission": "Allow LoveCapsule to access your photos for diary entries",
+          "cameraPermission": "Allow LoveCapsule to use the camera for diary entries"
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow TimeCapsule to use your location for diary entries"
+          "locationWhenInUsePermission": "Allow LoveCapsule to use your location for diary entries"
         }
       ],
       "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "be73ec20-7325-419e-81c5-dd0e9adb1f93"
+      }
     }
   }
 }
