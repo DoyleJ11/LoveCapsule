@@ -20,7 +20,8 @@ import { supabase } from '../../../src/lib/supabase';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { useCouple } from '../../../src/hooks/useCouple';
 import { useEntries } from '../../../src/hooks/useEntries';
-import { formatEntryDate } from '../../../src/lib/date-utils';
+import { useVoiceMemo } from '../../../src/hooks/useVoiceMemo';
+import { formatEntryDate, formatDuration } from '../../../src/lib/date-utils';
 import { compressImage, uploadMedia, getSignedUrl, deleteMedia } from '../../../src/lib/storage';
 import { Colors, Spacing, FontSize, BorderRadius, Moods } from '../../../src/constants/theme';
 import type { Entry, Media } from '../../../src/types/database';
@@ -33,6 +34,8 @@ export default function EntryDetailScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+
+  const voiceMemo = useVoiceMemo();
 
   const [entry, setEntry] = useState<Entry | null>(null);
   const [media, setMedia] = useState<(Media & { signedUrl?: string })[]>([]);
@@ -145,7 +148,8 @@ export default function EntryDetailScreen() {
   };
 
   const handleDeleteMedia = async (m: Media) => {
-    Alert.alert('Remove Image', 'Are you sure?', [
+    const label = m.media_type === 'audio' ? 'Voice Memo' : 'Image';
+    Alert.alert(`Remove ${label}`, 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',
@@ -165,6 +169,8 @@ export default function EntryDetailScreen() {
 
   const isOwner = entry?.author_id === user?.id;
   const mood = Moods.find((m) => m.key === entry?.mood);
+  const imageMedia = media.filter((m) => m.media_type === 'image');
+  const audioMedia = media.find((m) => m.media_type === 'audio');
 
   const handleSave = async () => {
     if (!entry) return;
@@ -303,14 +309,14 @@ export default function EntryDetailScreen() {
           />
 
           {/* Media in edit mode */}
-          {media.length > 0 && (
+          {imageMedia.length > 0 && (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               style={styles.mediaScroll}
               contentContainerStyle={styles.mediaScrollContent}
             >
-              {media.map((m) => (
+              {imageMedia.map((m) => (
                 <View key={m.id} style={styles.mediaThumbContainer}>
                   {m.signedUrl && <Image source={{ uri: m.signedUrl }} style={styles.mediaThumb} />}
                   {isOwner && (
@@ -335,6 +341,41 @@ export default function EntryDetailScreen() {
             <Text style={[styles.addImageText, { color: colors.textSecondary }]}>Add Image</Text>
           </TouchableOpacity>
 
+          {/* Voice memo in edit mode */}
+          {audioMedia && audioMedia.signedUrl && (
+            <View
+              style={[
+                styles.audioPlayerCard,
+                { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+              ]}
+            >
+              <TouchableOpacity
+                onPress={() =>
+                  voiceMemo.isPlaying
+                    ? voiceMemo.pauseAudio()
+                    : voiceMemo.playAudio(audioMedia.signedUrl)
+                }
+              >
+                <FontAwesome
+                  name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
+                  size={28}
+                  color={colors.primary}
+                />
+              </TouchableOpacity>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.audioPlayerLabel, { color: colors.text }]}>Voice Memo</Text>
+                <Text style={[styles.audioPlayerDuration, { color: colors.textMuted }]}>
+                  {formatDuration(audioMedia.duration_ms || 0)}
+                </Text>
+              </View>
+              {isOwner && (
+                <TouchableOpacity onPress={() => handleDeleteMedia(audioMedia)}>
+                  <FontAwesome name="times-circle" size={20} color={colors.error} />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
           <View style={styles.editActions}>
             <TouchableOpacity
               style={[styles.cancelButton, { borderColor: colors.border }]}
@@ -343,6 +384,7 @@ export default function EntryDetailScreen() {
                 setEditContent(entry.content_plain);
                 setEditEntryDate(entry.entry_date);
                 setShowDatePicker(false);
+                voiceMemo.stopPlayback();
                 setEditing(false);
               }}
             >
@@ -364,9 +406,9 @@ export default function EntryDetailScreen() {
           <Text style={[styles.body, { color: colors.text }]}>{entry.content_plain}</Text>
 
           {/* Entry Images */}
-          {media.length > 0 && (
+          {imageMedia.length > 0 && (
             <View style={styles.mediaGallery}>
-              {media.map((m) =>
+              {imageMedia.map((m) =>
                 m.signedUrl ? (
                   <Image
                     key={m.id}
@@ -376,6 +418,39 @@ export default function EntryDetailScreen() {
                   />
                 ) : null
               )}
+            </View>
+          )}
+
+          {/* Voice Memo Player */}
+          {audioMedia && audioMedia.signedUrl && (
+            <View
+              style={[
+                styles.audioPlayerCard,
+                { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+              ]}
+            >
+              <TouchableOpacity
+                onPress={() =>
+                  voiceMemo.isPlaying
+                    ? voiceMemo.pauseAudio()
+                    : voiceMemo.playAudio(audioMedia.signedUrl)
+                }
+              >
+                <FontAwesome
+                  name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
+                  size={36}
+                  color={colors.primary}
+                />
+              </TouchableOpacity>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.audioPlayerLabel, { color: colors.text }]}>Voice Memo</Text>
+                <Text style={[styles.audioPlayerDuration, { color: colors.textMuted }]}>
+                  {voiceMemo.isPlaying
+                    ? formatDuration(voiceMemo.playbackPositionSecs * 1000)
+                    : formatDuration(audioMedia.duration_ms || 0)}
+                  {audioMedia.duration_ms ? ` / ${formatDuration(audioMedia.duration_ms)}` : ''}
+                </Text>
+              </View>
             </View>
           )}
 
@@ -608,5 +683,22 @@ const styles = StyleSheet.create({
   deleteButtonText: {
     fontSize: FontSize.md,
     fontWeight: '500',
+  },
+  audioPlayerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    marginBottom: Spacing.lg,
+  },
+  audioPlayerLabel: {
+    fontSize: FontSize.sm,
+    fontWeight: '500',
+  },
+  audioPlayerDuration: {
+    fontSize: FontSize.xs,
+    marginTop: 2,
   },
 });

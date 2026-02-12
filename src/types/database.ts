@@ -43,11 +43,12 @@ export interface Media {
   entry_id: string;
   author_id: string;
   storage_path: string;
-  media_type: 'image' | 'video';
+  media_type: 'image' | 'video' | 'audio';
   mime_type: string;
   file_size_bytes: number | null;
   width: number | null;
   height: number | null;
+  duration_ms: number | null;
   thumbnail_path: string | null;
   created_at: string;
 }
