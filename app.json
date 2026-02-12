@@ -20,6 +20,7 @@
         "NSCameraUsageDescription": "Take photos for your diary entries",
         "NSPhotoLibraryUsageDescription": "Choose photos for your diary entries",
         "NSLocationWhenInUseUsageDescription": "Add locations to your diary entries",
+        "NSMicrophoneUsageDescription": "Record voice memos for your diary entries",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -45,7 +46,13 @@
           "locationWhenInUsePermission": "Allow LoveCapsule to use your location for diary entries"
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow LoveCapsule to record voice memos for your diary entries"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
@@ -55,6 +62,15 @@
       "eas": {
         "projectId": "be73ec20-7325-419e-81c5-dd0e9adb1f93"
       }
+    },
+    "android": {
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.timecapsule.diary"
     }
   }
 }

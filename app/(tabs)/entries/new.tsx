@@ -24,7 +24,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { useCouple } from '../../../src/hooks/useCouple';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { useEntries, type CreateEntryInput } from '../../../src/hooks/useEntries';
-import { getCurrentDateString, formatEntryDate } from '../../../src/lib/date-utils';
+import { useVoiceMemo } from '../../../src/hooks/useVoiceMemo';
+import { getCurrentDateString, formatEntryDate, formatDuration } from '../../../src/lib/date-utils';
 import { compressImage, uploadMedia } from '../../../src/lib/storage';
 import { supabase } from '../../../src/lib/supabase';
 import { searchLocations, type LocationResult } from '../../../src/lib/location-search';
@@ -58,6 +59,22 @@ export default function NewEntryScreen() {
   const [locationLng, setLocationLng] = useState<number | null>(null);
   const [pendingImages, setPendingImages] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [saving, setSaving] = useState(false);
+  const [pendingVoiceMemo, setPendingVoiceMemo] = useState<{
+    uri: string;
+    durationMs: number;
+  } | null>(null);
+  const voiceMemo = useVoiceMemo();
+
+  // When recording stops and a URI is available, set as pending voice memo
+  useEffect(() => {
+    if (voiceMemo.recordingUri && voiceMemo.durationMs > 0 && !pendingVoiceMemo) {
+      setPendingVoiceMemo({
+        uri: voiceMemo.recordingUri,
+        durationMs: voiceMemo.durationMs,
+      });
+    }
+  }, [voiceMemo.recordingUri, voiceMemo.durationMs]);
+
   const [locationSearchVisible, setLocationSearchVisible] = useState(false);
   const [locationQuery, setLocationQuery] = useState('');
   const [locationSearching, setLocationSearching] = useState(false);
@@ -105,7 +122,12 @@ export default function NewEntryScreen() {
     return () => clearTimeout(timeout);
   }, [title, content, mood, entryDate, locationName, locationLat, locationLng]);
 
-  const hasContent = !!(title.trim() || content.trim() || pendingImages.length > 0);
+  const hasContent = !!(
+    title.trim() ||
+    content.trim() ||
+    pendingImages.length > 0 ||
+    pendingVoiceMemo
+  );
 
   // Disable swipe-to-dismiss gesture when there's content to prevent accidental loss
   useEffect(() => {
@@ -117,7 +139,7 @@ export default function NewEntryScreen() {
   const handleClose = () => {
     if (!hasContent || savedSuccessfully.current) {
       AsyncStorage.removeItem(DRAFT_KEY);
-      router.dismiss();
+      router.dismissAll();
       return;
     }
     Alert.alert(
@@ -130,7 +152,7 @@ export default function NewEntryScreen() {
           style: 'destructive',
           onPress: () => {
             AsyncStorage.removeItem(DRAFT_KEY);
-            router.dismiss();
+            router.dismissAll();
           },
         },
       ]
@@ -205,9 +227,33 @@ export default function NewEntryScreen() {
         }
       }
 
+      // Upload pending voice memo
+      if (pendingVoiceMemo && user) {
+        try {
+          const fileName = `${Date.now()}_voicememo.m4a`;
+          const storagePath = await uploadMedia(
+            pendingVoiceMemo.uri,
+            user.id,
+            entry.id,
+            fileName,
+            'audio/mp4'
+          );
+          await supabase.from('media').insert({
+            entry_id: entry.id,
+            author_id: user.id,
+            storage_path: storagePath,
+            media_type: 'audio',
+            mime_type: 'audio/mp4',
+            duration_ms: pendingVoiceMemo.durationMs,
+          });
+        } catch (uploadErr: any) {
+          console.warn('Voice memo upload failed:', uploadErr.message);
+        }
+      }
+
       savedSuccessfully.current = true;
       await AsyncStorage.removeItem(DRAFT_KEY);
-      router.dismiss();
+      router.dismissAll();
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
@@ -446,6 +492,49 @@ export default function NewEntryScreen() {
           </ScrollView>
         )}
 
+        {/* Voice Memo */}
+        {pendingVoiceMemo && (
+          <View
+            style={[
+              styles.voiceMemoCard,
+              { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+            ]}
+          >
+            <TouchableOpacity
+              onPress={() =>
+                voiceMemo.isPlaying
+                  ? voiceMemo.pauseAudio()
+                  : voiceMemo.playAudio(pendingVoiceMemo.uri)
+              }
+            >
+              <FontAwesome
+                name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
+                size={32}
+                color={colors.primary}
+              />
+            </TouchableOpacity>
+            <View style={styles.voiceMemoInfo}>
+              <Text style={[styles.voiceMemoLabel, { color: colors.text }]}>Voice Memo</Text>
+              <Text style={[styles.voiceMemoDuration, { color: colors.textMuted }]}>
+                {voiceMemo.isPlaying
+                  ? formatDuration(voiceMemo.playbackPositionSecs * 1000)
+                  : formatDuration(pendingVoiceMemo.durationMs)}
+                {' / '}
+                {formatDuration(pendingVoiceMemo.durationMs)}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                voiceMemo.stopPlayback();
+                voiceMemo.resetRecording();
+                setPendingVoiceMemo(null);
+              }}
+            >
+              <FontAwesome name="times-circle" size={20} color={colors.error} />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Content */}
         <TextInput
           style={[styles.contentInput, { color: colors.text }]}
@@ -457,6 +546,24 @@ export default function NewEntryScreen() {
           textAlignVertical="top"
         />
       </ScrollView>
+
+      {/* Recording Indicator */}
+      {voiceMemo.isRecording && (
+        <View
+          style={[
+            styles.recordingBar,
+            { backgroundColor: colors.error + '10', borderTopColor: colors.border },
+          ]}
+        >
+          <View style={[styles.recordingDot, { backgroundColor: colors.error }]} />
+          <Text style={[styles.recordingText, { color: colors.error }]}>
+            {formatDuration(voiceMemo.recordingDurationSecs * 1000)}
+          </Text>
+          <TouchableOpacity onPress={voiceMemo.stopRecording}>
+            <FontAwesome name="stop-circle" size={24} color={colors.error} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Toolbar */}
       <View
@@ -471,6 +578,29 @@ export default function NewEntryScreen() {
               name="map-marker"
               size={20}
               color={locationName ? colors.primary : colors.textSecondary}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.toolbarButton}
+            onPress={
+              pendingVoiceMemo
+                ? undefined
+                : voiceMemo.isRecording
+                  ? voiceMemo.stopRecording
+                  : voiceMemo.startRecording
+            }
+            disabled={!!pendingVoiceMemo}
+          >
+            <FontAwesome
+              name="microphone"
+              size={20}
+              color={
+                voiceMemo.isRecording
+                  ? colors.error
+                  : pendingVoiceMemo
+                    ? colors.primary
+                    : colors.textSecondary
+              }
             />
           </TouchableOpacity>
         </View>
@@ -682,6 +812,44 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     lineHeight: 24,
     minHeight: 300,
+  },
+  recordingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderTopWidth: 1,
+  },
+  recordingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  recordingText: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+  },
+  voiceMemoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+  },
+  voiceMemoInfo: {
+    flex: 1,
+  },
+  voiceMemoLabel: {
+    fontSize: FontSize.sm,
+    fontWeight: '500',
+  },
+  voiceMemoDuration: {
+    fontSize: FontSize.xs,
+    marginTop: 2,
   },
   toolbar: {
     flexDirection: 'row',
