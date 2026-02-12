@@ -5,6 +5,7 @@ import {
   formatShortDate,
   formatRelativeDay,
   getCurrentDateString,
+  formatDuration,
   formatCheckpointFrequency,
   formatCheckpointDescription,
   getNextCheckpointDate,
@@ -135,6 +136,27 @@ describe('date-utils', () => {
     it('handles single-digit months and days with padding', () => {
       mockDate('2024-01-05');
       expect(getCurrentDateString()).toBe('2024-01-05');
+    });
+  });
+
+  describe('formatDuration', () => {
+    it('formats zero duration', () => {
+      expect(formatDuration(0)).toBe('0:00');
+    });
+
+    it('formats seconds only', () => {
+      expect(formatDuration(5000)).toBe('0:05');
+      expect(formatDuration(30000)).toBe('0:30');
+    });
+
+    it('formats minutes and seconds', () => {
+      expect(formatDuration(65000)).toBe('1:05');
+      expect(formatDuration(150000)).toBe('2:30');
+    });
+
+    it('pads seconds with leading zero', () => {
+      expect(formatDuration(60000)).toBe('1:00');
+      expect(formatDuration(63000)).toBe('1:03');
     });
   });
 
