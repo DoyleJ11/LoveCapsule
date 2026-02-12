@@ -3,11 +3,13 @@ import { Alert } from 'react-native';
 import {
   useAudioRecorder,
   useAudioRecorderState,
-  useAudioPlayer,
+  createAudioPlayer,
   RecordingPresets,
   setAudioModeAsync,
   requestRecordingPermissionsAsync,
 } from 'expo-audio';
+import { File, Paths } from 'expo-file-system';
+import type { AudioPlayer } from 'expo-audio';
 
 export interface UseVoiceMemoReturn {
   // Recording
@@ -40,42 +42,54 @@ export function useVoiceMemo(): UseVoiceMemoReturn {
   const [playbackDurationSecs, setPlaybackDurationSecs] = useState(0);
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-
-  // useAudioRecorderState polls the recorder and returns reactive state
-  // that triggers re-renders when isRecording / durationMillis change
   const recorderState = useAudioRecorderState(recorder, 100);
 
-  const [playerSourceUri, setPlayerSourceUri] = useState<string | null>(null);
-  const pendingPlayRef = useRef(false);
-  const player = useAudioPlayer(playerSourceUri ?? undefined);
+  // Imperative player management via refs (avoids useAudioPlayer hook lifecycle issues)
+  const playerRef = useRef<AudioPlayer | null>(null);
+  const currentSourceRef = useRef<string | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Auto-play when player is ready after a source change.
-  // Uses a ref to avoid calling setState inside the effect.
-  // The polling effect below detects player.playing and updates isPlaying.
+  // Clean up on unmount
   useEffect(() => {
-    if (!pendingPlayRef.current || !player) return;
-    pendingPlayRef.current = false;
-    player.play();
-  }, [player]);
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      if (playerRef.current) {
+        playerRef.current.pause();
+        playerRef.current.release();
+        playerRef.current = null;
+      }
+    };
+  }, []);
 
-  // Track playback state
-  useEffect(() => {
-    if (!player) return;
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
 
-    const pollInterval = setInterval(() => {
-      if (player.playing) {
+  // Poll playback progress. Only stops when playback was active and then stops.
+  const playbackStartedRef = useRef(false);
+
+  const startPolling = useCallback(() => {
+    stopPolling();
+    playbackStartedRef.current = false;
+    pollIntervalRef.current = setInterval(() => {
+      const p = playerRef.current;
+      if (!p) return;
+      if (p.playing) {
+        playbackStartedRef.current = true;
         setIsPlaying(true);
-        setPlaybackPositionSecs(player.currentTime);
-        setPlaybackDurationSecs(player.duration);
-      } else {
-        if (isPlaying) {
-          setIsPlaying(false);
-        }
+        setPlaybackPositionSecs(p.currentTime);
+        setPlaybackDurationSecs(p.duration);
+      } else if (playbackStartedRef.current) {
+        // Playback was active and has now stopped (finished)
+        setIsPlaying(false);
+        setPlaybackPositionSecs(0);
+        stopPolling();
       }
     }, 100);
-
-    return () => clearInterval(pollInterval);
-  }, [player, isPlaying]);
+  }, [stopPolling]);
 
   const startRecording = useCallback(async () => {
     try {
@@ -99,10 +113,36 @@ export function useVoiceMemo(): UseVoiceMemoReturn {
 
   const stopRecording = useCallback(async () => {
     try {
-      // Capture duration before stopping — recorder.currentTime resets after stop()
       const duration = Math.round(recorderState.durationMillis);
       await recorder.stop();
-      const uri = recorder.uri;
+
+      // Switch audio session out of recording mode and wait for it to complete.
+      // On iOS, the M4A file's moov atom (duration metadata) may not be fully
+      // written until the audio session transitions out of recording mode.
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+      });
+
+      const originalUri = recorder.uri;
+
+      // WORKAROUND: expo-audio's recorder on iOS (particularly in the simulator)
+      // can write the M4A file with an incomplete moov atom, causing players to
+      // read a near-zero duration (~22ms). Copying the file to a new path gives
+      // the OS a chance to write a clean copy with correct metadata.
+      let uri = originalUri;
+      if (originalUri) {
+        try {
+          const sourceFile = new File(originalUri);
+          const destFile = new File(Paths.cache, `voicememo_${Date.now()}.m4a`);
+          sourceFile.copy(destFile);
+          uri = destFile.uri;
+        } catch (copyErr) {
+          console.warn('[VoiceMemo] copy failed, using original:', copyErr);
+          // Fall back to original URI if copy fails
+        }
+      }
+
       setRecordingUri(uri);
       setDurationMs(duration > 0 ? duration : 1);
     } catch (e: any) {
@@ -115,51 +155,78 @@ export function useVoiceMemo(): UseVoiceMemoReturn {
       const sourceUri = uri || recordingUri;
       if (!sourceUri) return;
 
+      // If same source and player exists, just resume/replay
+      if (currentSourceRef.current === sourceUri && playerRef.current) {
+        const p = playerRef.current;
+        if (p.currentTime >= p.duration && p.duration > 0) {
+          p.seekTo(0);
+        }
+        p.play();
+        setIsPlaying(true);
+        startPolling();
+        return;
+      }
+
+      // Release old player if switching sources
+      if (playerRef.current) {
+        playerRef.current.pause();
+        playerRef.current.release();
+        playerRef.current = null;
+      }
+
+      // Create new player
+      currentSourceRef.current = sourceUri;
+      const newPlayer = createAudioPlayer({ uri: sourceUri });
+      playerRef.current = newPlayer;
+
+      // Set audio mode and give the player a moment to load, then play.
       setAudioModeAsync({
         allowsRecording: false,
         playsInSilentMode: true,
+      }).then(() => {
+        setTimeout(() => {
+          const p = playerRef.current;
+          if (!p || currentSourceRef.current !== sourceUri) return;
+          p.play();
+          setIsPlaying(true);
+          startPolling();
+        }, 150);
       });
-
-      if (playerSourceUri === sourceUri && player) {
-        // Same source — just resume or replay
-        if (player.currentTime >= player.duration && player.duration > 0) {
-          player.seekTo(0);
-        }
-        player.play();
-        setIsPlaying(true);
-      } else {
-        // New source — set URI and flag; useEffect will auto-play once player is ready
-        pendingPlayRef.current = true;
-        setPlayerSourceUri(sourceUri);
-      }
     },
-    [recordingUri, player, playerSourceUri]
+    [recordingUri, startPolling]
   );
 
   const pauseAudio = useCallback(() => {
-    player?.pause();
+    playerRef.current?.pause();
     setIsPlaying(false);
-  }, [player]);
+    stopPolling();
+  }, [stopPolling]);
 
   const stopPlayback = useCallback(() => {
-    player?.pause();
-    player?.seekTo(0);
+    playerRef.current?.pause();
+    playerRef.current?.seekTo(0);
     setIsPlaying(false);
     setPlaybackPositionSecs(0);
-  }, [player]);
+    stopPolling();
+  }, [stopPolling]);
 
   const resetRecording = useCallback(() => {
     if (recorderState.isRecording) {
       recorder.stop();
     }
-    player?.pause();
+    if (playerRef.current) {
+      playerRef.current.pause();
+      playerRef.current.release();
+      playerRef.current = null;
+    }
+    currentSourceRef.current = null;
+    stopPolling();
     setRecordingUri(null);
     setDurationMs(0);
     setIsPlaying(false);
     setPlaybackPositionSecs(0);
     setPlaybackDurationSecs(0);
-    setPlayerSourceUri(null);
-  }, [recorder, recorderState.isRecording, player]);
+  }, [recorder, recorderState.isRecording, stopPolling]);
 
   return {
     isRecording: recorderState.isRecording,

@@ -1,12 +1,5 @@
 import { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  useColorScheme,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useColorScheme } from 'react-native';
 import { useRouter } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useAuth } from '../../src/providers/AuthProvider';
@@ -17,7 +10,13 @@ import { Colors, Spacing, FontSize, BorderRadius } from '../../src/constants/the
 
 export default function HomeScreen() {
   const { profile } = useAuth();
-  const { couple, partner, daysUntilAnniversary, isRevealReady, loading: coupleLoading } = useCouple();
+  const {
+    couple,
+    partner,
+    daysUntilAnniversary,
+    isRevealReady,
+    loading: coupleLoading,
+  } = useCouple();
   const { entries, loading: entriesLoading } = useEntries(couple?.id);
   const [partnerEntryCount, setPartnerEntryCount] = useState<number>(0);
   const router = useRouter();
@@ -26,11 +25,9 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (couple?.id) {
-      supabase
-        .rpc('get_partner_entry_count', { p_couple_id: couple.id })
-        .then(({ data }) => {
-          if (data !== null) setPartnerEntryCount(data);
-        });
+      supabase.rpc('get_partner_entry_count', { p_couple_id: couple.id }).then(({ data }) => {
+        if (data !== null) setPartnerEntryCount(data);
+      });
     }
   }, [couple?.id]);
 
@@ -50,9 +47,7 @@ export default function HomeScreen() {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.centered}>
           <FontAwesome name="heart" size={64} color={colors.primary} />
-          <Text style={[styles.welcomeTitle, { color: colors.text }]}>
-            Welcome to TimeCapsule
-          </Text>
+          <Text style={[styles.welcomeTitle, { color: colors.text }]}>Welcome to TimeCapsule</Text>
           <Text style={[styles.welcomeSubtitle, { color: colors.textSecondary }]}>
             Connect with your partner to start writing diary entries for each other
           </Text>
@@ -86,7 +81,9 @@ export default function HomeScreen() {
 
       {/* Anniversary Countdown */}
       {daysUntilAnniversary !== null && (
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View
+          style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        >
           <View style={styles.countdownContent}>
             <Text style={[styles.countdownNumber, { color: colors.primary }]}>
               {daysUntilAnniversary}
@@ -130,7 +127,9 @@ export default function HomeScreen() {
 
       {/* Partner Teaser */}
       {partner && (
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View
+          style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        >
           <Text style={[styles.cardTitle, { color: colors.text }]}>
             {partner.display_name}'s Diary
           </Text>
@@ -148,7 +147,14 @@ export default function HomeScreen() {
       {/* Write Entry CTA */}
       <TouchableOpacity
         style={[styles.writeButton, { backgroundColor: colors.primary }]}
-        onPress={() => router.push('/(tabs)/entries/new')}
+        onPress={() => {
+          // Navigate to entries tab first, then push the new entry modal.
+          // Using router.navigate ensures the entries stack is properly initialized
+          // before pushing the modal, avoiding POP errors when the Diary tab
+          // hasn't been visited yet.
+          router.navigate('/(tabs)/entries');
+          setTimeout(() => router.push('/(tabs)/entries/new'), 0);
+        }}
       >
         <FontAwesome name="pencil" size={20} color="#fff" />
         <Text style={styles.writeButtonText}>Write a New Entry</Text>

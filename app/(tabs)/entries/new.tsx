@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,14 +11,13 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   useColorScheme,
   ActionSheetIOS,
   Modal,
   ActivityIndicator,
   FlatList,
 } from 'react-native';
-import { useRouter, useNavigation } from 'expo-router';
+import { useRouter, useNavigation, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
@@ -26,6 +25,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { useCouple } from '../../../src/hooks/useCouple';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { useEntries, type CreateEntryInput } from '../../../src/hooks/useEntries';
+import { getSignedUrl, deleteMedia } from '../../../src/lib/storage';
+import type { Media } from '../../../src/types/database';
 import { useVoiceMemo } from '../../../src/hooks/useVoiceMemo';
 import { getCurrentDateString, formatEntryDate, formatDuration } from '../../../src/lib/date-utils';
 import { compressImage, uploadMedia } from '../../../src/lib/storage';
@@ -43,9 +44,11 @@ import {
 const DRAFT_KEY = 'new_entry_draft';
 
 export default function NewEntryScreen() {
+  const { entryId } = useLocalSearchParams<{ entryId?: string }>();
+  const isEditMode = !!entryId;
   const { couple } = useCouple();
   const { user } = useAuth();
-  const { createEntry } = useEntries(couple?.id);
+  const { createEntry, updateEntry } = useEntries(couple?.id);
   const router = useRouter();
   const navigation = useNavigation();
   const colorScheme = useColorScheme();
@@ -67,6 +70,15 @@ export default function NewEntryScreen() {
   } | null>(null);
   const voiceMemo = useVoiceMemo();
 
+  // Edit mode state
+  const [existingImages, setExistingImages] = useState<(Media & { signedUrl?: string })[]>([]);
+  const [imagesToDelete, setImagesToDelete] = useState<Media[]>([]);
+  const [existingVoiceMemo, setExistingVoiceMemo] = useState<
+    (Media & { signedUrl?: string }) | null
+  >(null);
+  const [deleteExistingVoiceMemo, setDeleteExistingVoiceMemo] = useState(false);
+  const [loadingEntry, setLoadingEntry] = useState(isEditMode);
+
   // When recording stops and a URI is available, set as pending voice memo
   useEffect(() => {
     if (voiceMemo.recordingUri && voiceMemo.durationMs > 0 && !pendingVoiceMemo) {
@@ -77,17 +89,96 @@ export default function NewEntryScreen() {
     }
   }, [voiceMemo.recordingUri, voiceMemo.durationMs]);
 
+  // Load existing entry data in edit mode
+  useEffect(() => {
+    if (!entryId) return;
+    let cancelled = false;
+
+    const loadEntry = async () => {
+      try {
+        const { data: entryData, error: entryError } = await supabase
+          .from('entries')
+          .select('*')
+          .eq('id', entryId)
+          .single();
+
+        if (entryError || !entryData || cancelled) return;
+
+        setTitle(entryData.title || '');
+        setContent(entryData.content_plain || '');
+        setMood(entryData.mood as MoodKey | null);
+        setEntryDate(entryData.entry_date);
+        setLocationName(entryData.location_name);
+        setLocationLat(entryData.location_lat);
+        setLocationLng(entryData.location_lng);
+
+        // Load media
+        const { data: mediaData } = await supabase
+          .from('media')
+          .select('*')
+          .eq('entry_id', entryId)
+          .order('created_at', { ascending: true });
+
+        if (cancelled) return;
+
+        if (mediaData && mediaData.length > 0) {
+          const images: (Media & { signedUrl?: string })[] = [];
+          let audio: (Media & { signedUrl?: string }) | null = null;
+
+          for (const m of mediaData) {
+            try {
+              const signedUrl = await getSignedUrl(m.storage_path);
+              if (m.media_type === 'image') {
+                images.push({ ...m, signedUrl });
+              } else if (m.media_type === 'audio') {
+                audio = { ...m, signedUrl };
+              }
+            } catch {
+              if (m.media_type === 'image') images.push(m);
+              else if (m.media_type === 'audio') audio = m;
+            }
+          }
+
+          setExistingImages(images);
+          setExistingVoiceMemo(audio);
+        }
+      } finally {
+        if (!cancelled) setLoadingEntry(false);
+      }
+    };
+
+    loadEntry();
+    return () => {
+      cancelled = true;
+    };
+  }, [entryId]);
+
   const [locationSearchVisible, setLocationSearchVisible] = useState(false);
   const [locationQuery, setLocationQuery] = useState('');
   const [locationSearching, setLocationSearching] = useState(false);
   const [locationResults, setLocationResults] = useState<LocationResult[]>([]);
   const savedSuccessfully = useRef(false);
+
+  // Safe navigation back from the new entry screen.
+  // Check if there are other screens in the entries stack to pop back to.
+  // navigation.canGoBack() can be misleading because it checks the parent
+  // navigator too. Instead, check the entries stack's route count directly.
+  const navigateAway = useCallback(() => {
+    const state = navigation.getState();
+    const hasScreenBelow = state && state.routes && state.routes.length > 1;
+    if (hasScreenBelow) {
+      router.dismiss();
+    } else {
+      router.navigate('/(tabs)/entries');
+    }
+  }, [router, navigation]);
   const scrollViewRef = useRef<ScrollView>(null);
   const locationSearchRef = useRef<TextInput>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Restore draft on mount
+  // Restore draft on mount (create mode only)
   useEffect(() => {
+    if (isEditMode) return;
     AsyncStorage.getItem(DRAFT_KEY).then((raw) => {
       if (!raw) return;
       try {
@@ -103,8 +194,9 @@ export default function NewEntryScreen() {
     });
   }, []);
 
-  // Auto-save draft on changes (debounced)
+  // Auto-save draft on changes (debounced, create mode only)
   useEffect(() => {
+    if (isEditMode) return;
     if (savedSuccessfully.current) return;
     const timeout = setTimeout(() => {
       if (title.trim() || content.trim()) {
@@ -125,12 +217,11 @@ export default function NewEntryScreen() {
     return () => clearTimeout(timeout);
   }, [title, content, mood, entryDate, locationName, locationLat, locationLng]);
 
-  const hasContent = !!(
-    title.trim() ||
-    content.trim() ||
-    pendingImages.length > 0 ||
-    pendingVoiceMemo
-  );
+  const hasMemo = !!pendingVoiceMemo || (!!existingVoiceMemo && !deleteExistingVoiceMemo);
+
+  const hasContent =
+    isEditMode ||
+    !!(title.trim() || content.trim() || pendingImages.length > 0 || pendingVoiceMemo);
 
   // Disable swipe-to-dismiss gesture when there's content to prevent accidental loss
   useEffect(() => {
@@ -140,9 +231,25 @@ export default function NewEntryScreen() {
   }, [navigation, hasContent]);
 
   const handleClose = () => {
+    if (isEditMode) {
+      if (savedSuccessfully.current) {
+        router.back();
+        return;
+      }
+      Alert.alert('Discard Changes?', 'You have unsaved changes that will be lost.', [
+        { text: 'Keep Editing', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => router.back(),
+        },
+      ]);
+      return;
+    }
+
     if (!hasContent || savedSuccessfully.current) {
       AsyncStorage.removeItem(DRAFT_KEY);
-      router.dismissAll();
+      navigateAway();
       return;
     }
     Alert.alert(
@@ -155,23 +262,24 @@ export default function NewEntryScreen() {
           style: 'destructive',
           onPress: () => {
             AsyncStorage.removeItem(DRAFT_KEY);
-            router.dismissAll();
+            navigateAway();
           },
         },
       ]
     );
   };
 
-  // Add a close button to the header
+  // Set up header with close button and title
   useEffect(() => {
     navigation.setOptions({
+      headerTitle: isEditMode ? 'Edit Entry' : 'New Entry',
       headerLeft: () => (
         <TouchableOpacity onPress={handleClose} style={{ padding: 8 }}>
           <Text style={{ color: colors.primary, fontSize: FontSize.md }}>Cancel</Text>
         </TouchableOpacity>
       ),
     });
-  }, [navigation, hasContent, colors.primary]);
+  }, [navigation, hasContent, colors.primary, isEditMode]);
 
   const handleSave = async (isDraft: boolean) => {
     Keyboard.dismiss();
@@ -187,77 +295,171 @@ export default function NewEntryScreen() {
 
     setSaving(true);
     try {
-      const entryData: CreateEntryInput = {
-        couple_id: couple.id,
-        title: title.trim(),
-        content_html: `<p>${content.replace(/\n/g, '</p><p>')}</p>`,
-        content_plain: content,
-        word_count: content.trim() ? content.trim().split(/\s+/).length : 0,
-        mood,
-        is_draft: isDraft,
-        entry_date: entryDate,
-        location_name: locationName,
-        location_lat: locationLat,
-        location_lng: locationLng,
-      };
+      if (isEditMode && entryId) {
+        // ---- EDIT MODE ----
+        // Preserve the entry's current draft status (don't auto-publish)
+        await updateEntry(entryId, {
+          title: title.trim(),
+          content_html: `<p>${content.replace(/\n/g, '</p><p>')}</p>`,
+          content_plain: content,
+          word_count: content.trim() ? content.trim().split(/\s+/).length : 0,
+          mood,
+          entry_date: entryDate,
+          location_name: locationName,
+          location_lat: locationLat,
+          location_lng: locationLng,
+        });
 
-      const entry = await createEntry(entryData);
+        // Delete removed images
+        if (user) {
+          for (const img of imagesToDelete) {
+            try {
+              await deleteMedia(img.storage_path);
+              await supabase.from('media').delete().eq('id', img.id);
+            } catch (err: any) {
+              console.warn('Failed to delete image:', err.message);
+            }
+          }
+        }
 
-      // Upload pending images
-      if (pendingImages.length > 0 && user) {
-        for (const asset of pendingImages) {
+        // Delete existing voice memo if flagged
+        if (deleteExistingVoiceMemo && existingVoiceMemo) {
           try {
-            const compressed = await compressImage(asset.uri);
-            const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+            await deleteMedia(existingVoiceMemo.storage_path);
+            await supabase.from('media').delete().eq('id', existingVoiceMemo.id);
+          } catch (err: any) {
+            console.warn('Failed to delete voice memo:', err.message);
+          }
+        }
+
+        // Upload new pending images
+        if (pendingImages.length > 0 && user) {
+          for (const asset of pendingImages) {
+            try {
+              const compressed = await compressImage(asset.uri);
+              const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+              const storagePath = await uploadMedia(
+                compressed,
+                user.id,
+                entryId,
+                fileName,
+                'image/jpeg'
+              );
+              await supabase.from('media').insert({
+                entry_id: entryId,
+                author_id: user.id,
+                storage_path: storagePath,
+                media_type: 'image',
+                mime_type: 'image/jpeg',
+                width: asset.width,
+                height: asset.height,
+              });
+            } catch (uploadErr: any) {
+              console.warn('Image upload failed:', uploadErr.message);
+            }
+          }
+        }
+
+        // Upload new pending voice memo
+        if (pendingVoiceMemo && user) {
+          try {
+            const fileName = `${Date.now()}_voicememo.m4a`;
             const storagePath = await uploadMedia(
-              compressed,
+              pendingVoiceMemo.uri,
+              user.id,
+              entryId,
+              fileName,
+              'audio/mp4'
+            );
+            await supabase.from('media').insert({
+              entry_id: entryId,
+              author_id: user.id,
+              storage_path: storagePath,
+              media_type: 'audio',
+              mime_type: 'audio/mp4',
+              duration_ms: pendingVoiceMemo.durationMs,
+            });
+          } catch (uploadErr: any) {
+            console.warn('Voice memo upload failed:', uploadErr.message);
+          }
+        }
+
+        savedSuccessfully.current = true;
+        router.back();
+      } else {
+        // ---- CREATE MODE ----
+        const entryData: CreateEntryInput = {
+          couple_id: couple.id,
+          title: title.trim(),
+          content_html: `<p>${content.replace(/\n/g, '</p><p>')}</p>`,
+          content_plain: content,
+          word_count: content.trim() ? content.trim().split(/\s+/).length : 0,
+          mood,
+          is_draft: isDraft,
+          entry_date: entryDate,
+          location_name: locationName,
+          location_lat: locationLat,
+          location_lng: locationLng,
+        };
+
+        const entry = await createEntry(entryData);
+
+        // Upload pending images
+        if (pendingImages.length > 0 && user) {
+          for (const asset of pendingImages) {
+            try {
+              const compressed = await compressImage(asset.uri);
+              const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+              const storagePath = await uploadMedia(
+                compressed,
+                user.id,
+                entry.id,
+                fileName,
+                'image/jpeg'
+              );
+              await supabase.from('media').insert({
+                entry_id: entry.id,
+                author_id: user.id,
+                storage_path: storagePath,
+                media_type: 'image',
+                mime_type: 'image/jpeg',
+                width: asset.width,
+                height: asset.height,
+              });
+            } catch (uploadErr: any) {
+              console.warn('Image upload failed:', uploadErr.message);
+            }
+          }
+        }
+
+        // Upload pending voice memo
+        if (pendingVoiceMemo && user) {
+          try {
+            const fileName = `${Date.now()}_voicememo.m4a`;
+            const storagePath = await uploadMedia(
+              pendingVoiceMemo.uri,
               user.id,
               entry.id,
               fileName,
-              'image/jpeg'
+              'audio/mp4'
             );
             await supabase.from('media').insert({
               entry_id: entry.id,
               author_id: user.id,
               storage_path: storagePath,
-              media_type: 'image',
-              mime_type: 'image/jpeg',
-              width: asset.width,
-              height: asset.height,
+              media_type: 'audio',
+              mime_type: 'audio/mp4',
+              duration_ms: pendingVoiceMemo.durationMs,
             });
           } catch (uploadErr: any) {
-            console.warn('Image upload failed:', uploadErr.message);
+            console.warn('Voice memo upload failed:', uploadErr.message);
           }
         }
-      }
 
-      // Upload pending voice memo
-      if (pendingVoiceMemo && user) {
-        try {
-          const fileName = `${Date.now()}_voicememo.m4a`;
-          const storagePath = await uploadMedia(
-            pendingVoiceMemo.uri,
-            user.id,
-            entry.id,
-            fileName,
-            'audio/mp4'
-          );
-          await supabase.from('media').insert({
-            entry_id: entry.id,
-            author_id: user.id,
-            storage_path: storagePath,
-            media_type: 'audio',
-            mime_type: 'audio/mp4',
-            duration_ms: pendingVoiceMemo.durationMs,
-          });
-        } catch (uploadErr: any) {
-          console.warn('Voice memo upload failed:', uploadErr.message);
-        }
+        savedSuccessfully.current = true;
+        await AsyncStorage.removeItem(DRAFT_KEY);
+        navigateAway();
       }
-
-      savedSuccessfully.current = true;
-      await AsyncStorage.removeItem(DRAFT_KEY);
-      router.dismissAll();
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
@@ -378,6 +580,19 @@ export default function NewEntryScreen() {
     }
   };
 
+  if (loadingEntry) {
+    return (
+      <View
+        style={[
+          styles.container,
+          { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
+        ]}
+      >
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -388,179 +603,235 @@ export default function NewEntryScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
+        keyboardDismissMode="on-drag"
       >
-        <Pressable onPress={Keyboard.dismiss} accessible={false}>
-          {/* Title */}
-          <TextInput
-            style={[styles.titleInput, { color: colors.text, borderBottomColor: colors.border }]}
-            placeholder="Entry title..."
-            placeholderTextColor={colors.textMuted}
-            value={title}
-            onChangeText={setTitle}
+        {/* Title */}
+        <TextInput
+          style={[styles.titleInput, { color: colors.text, borderBottomColor: colors.border }]}
+          placeholder="Entry title..."
+          placeholderTextColor={colors.textMuted}
+          value={title}
+          onChangeText={setTitle}
+        />
+
+        {/* Date Selector - when the entry's event took place */}
+        <TouchableOpacity
+          style={styles.datePickerRow}
+          onPress={() => setShowDatePicker(!showDatePicker)}
+        >
+          <FontAwesome name="calendar" size={14} color={colors.primary} />
+          <Text style={[styles.datePickerText, { color: colors.text }]}>
+            {formatEntryDate(entryDate)}
+          </Text>
+          <FontAwesome
+            name={showDatePicker ? 'chevron-up' : 'chevron-down'}
+            size={10}
+            color={colors.textMuted}
           />
+        </TouchableOpacity>
+        {showDatePicker && (
+          <DateTimePicker
+            value={new Date(entryDate + 'T12:00:00')}
+            mode="date"
+            display="inline"
+            maximumDate={new Date()}
+            onChange={handleDateChange}
+          />
+        )}
 
-          {/* Date Selector - when the entry's event took place */}
-          <TouchableOpacity
-            style={styles.datePickerRow}
-            onPress={() => setShowDatePicker(!showDatePicker)}
-          >
-            <FontAwesome name="calendar" size={14} color={colors.primary} />
-            <Text style={[styles.datePickerText, { color: colors.text }]}>
-              {formatEntryDate(entryDate)}
+        {/* Mood Selector */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.moodScroll}
+          contentContainerStyle={styles.moodContainer}
+        >
+          {Moods.map((m) => (
+            <TouchableOpacity
+              key={m.key}
+              style={[
+                styles.moodChip,
+                {
+                  backgroundColor: mood === m.key ? colors.primary + '20' : colors.surfaceSecondary,
+                  borderColor: mood === m.key ? colors.primary : colors.border,
+                },
+              ]}
+              onPress={() => setMood(mood === m.key ? null : m.key)}
+            >
+              <Text style={styles.moodChipEmoji}>{m.emoji}</Text>
+              <Text
+                style={[
+                  styles.moodChipLabel,
+                  { color: mood === m.key ? colors.primary : colors.textSecondary },
+                ]}
+              >
+                {m.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Location */}
+        {locationName ? (
+          <View style={[styles.locationDisplay, { backgroundColor: colors.surfaceSecondary }]}>
+            <FontAwesome name="map-marker" size={14} color={colors.primary} />
+            <Text style={[styles.locationDisplayText, { color: colors.text }]} numberOfLines={1}>
+              {locationName}
             </Text>
-            <FontAwesome
-              name={showDatePicker ? 'chevron-up' : 'chevron-down'}
-              size={10}
-              color={colors.textMuted}
-            />
-          </TouchableOpacity>
-          {showDatePicker && (
-            <DateTimePicker
-              value={new Date(entryDate + 'T12:00:00')}
-              mode="date"
-              display="inline"
-              maximumDate={new Date()}
-              onChange={handleDateChange}
-            />
-          )}
+            <TouchableOpacity
+              onPress={() => {
+                setLocationName(null);
+                setLocationLat(null);
+                setLocationLng(null);
+              }}
+            >
+              <FontAwesome name="times" size={14} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
-          {/* Mood Selector */}
+        {/* Images (existing + pending) */}
+        {(existingImages.length > 0 || pendingImages.length > 0) && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            style={styles.moodScroll}
-            contentContainerStyle={styles.moodContainer}
+            style={styles.imageScroll}
+            contentContainerStyle={styles.imageScrollContent}
           >
-            {Moods.map((m) => (
-              <TouchableOpacity
-                key={m.key}
-                style={[
-                  styles.moodChip,
-                  {
-                    backgroundColor:
-                      mood === m.key ? colors.primary + '20' : colors.surfaceSecondary,
-                    borderColor: mood === m.key ? colors.primary : colors.border,
-                  },
-                ]}
-                onPress={() => setMood(mood === m.key ? null : m.key)}
-              >
-                <Text style={styles.moodChipEmoji}>{m.emoji}</Text>
-                <Text
-                  style={[
-                    styles.moodChipLabel,
-                    { color: mood === m.key ? colors.primary : colors.textSecondary },
-                  ]}
+            {existingImages.map((img) => (
+              <View key={img.id} style={styles.imageThumbContainer}>
+                {img.signedUrl && (
+                  <Image source={{ uri: img.signedUrl }} style={styles.imageThumb} />
+                )}
+                <TouchableOpacity
+                  style={styles.imageRemoveButton}
+                  onPress={() => {
+                    setExistingImages((prev) => prev.filter((i) => i.id !== img.id));
+                    setImagesToDelete((prev) => [...prev, img]);
+                  }}
                 >
-                  {m.label}
-                </Text>
-              </TouchableOpacity>
+                  <FontAwesome name="times-circle" size={20} color={colors.error} />
+                </TouchableOpacity>
+              </View>
+            ))}
+            {pendingImages.map((asset, index) => (
+              <View key={`pending-${index}`} style={styles.imageThumbContainer}>
+                <Image source={{ uri: asset.uri }} style={styles.imageThumb} />
+                <TouchableOpacity
+                  style={styles.imageRemoveButton}
+                  onPress={() => setPendingImages((prev) => prev.filter((_, i) => i !== index))}
+                >
+                  <FontAwesome name="times-circle" size={20} color={colors.error} />
+                </TouchableOpacity>
+              </View>
             ))}
           </ScrollView>
+        )}
 
-          {/* Location */}
-          {locationName ? (
-            <View style={[styles.locationDisplay, { backgroundColor: colors.surfaceSecondary }]}>
-              <FontAwesome name="map-marker" size={14} color={colors.primary} />
-              <Text style={[styles.locationDisplayText, { color: colors.text }]} numberOfLines={1}>
-                {locationName}
-              </Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setLocationName(null);
-                  setLocationLat(null);
-                  setLocationLng(null);
-                }}
-              >
-                <FontAwesome name="times" size={14} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {/* Pending Images */}
-          {pendingImages.length > 0 && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.imageScroll}
-              contentContainerStyle={styles.imageScrollContent}
-            >
-              {pendingImages.map((asset, index) => (
-                <View key={index} style={styles.imageThumbContainer}>
-                  <Image source={{ uri: asset.uri }} style={styles.imageThumb} />
-                  <TouchableOpacity
-                    style={styles.imageRemoveButton}
-                    onPress={() => setPendingImages((prev) => prev.filter((_, i) => i !== index))}
-                  >
-                    <FontAwesome name="times-circle" size={20} color={colors.error} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </ScrollView>
-          )}
-
-          {/* Voice Memo */}
-          {pendingVoiceMemo && (
-            <View
-              style={[
-                styles.voiceMemoCard,
-                { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
-              ]}
-            >
-              <TouchableOpacity
-                onPress={() =>
-                  voiceMemo.isPlaying
-                    ? voiceMemo.pauseAudio()
-                    : voiceMemo.playAudio(pendingVoiceMemo.uri)
-                }
-              >
-                <FontAwesome
-                  name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
-                  size={32}
-                  color={colors.primary}
-                />
-              </TouchableOpacity>
-              <View style={styles.voiceMemoInfo}>
-                <Text style={[styles.voiceMemoLabel, { color: colors.text }]}>Voice Memo</Text>
-                <Text style={[styles.voiceMemoDuration, { color: colors.textMuted }]}>
-                  {voiceMemo.isPlaying
-                    ? formatDuration(voiceMemo.playbackPositionSecs * 1000)
-                    : formatDuration(pendingVoiceMemo.durationMs)}
-                  {' / '}
-                  {formatDuration(pendingVoiceMemo.durationMs)}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => {
-                  voiceMemo.stopPlayback();
-                  voiceMemo.resetRecording();
-                  setPendingVoiceMemo(null);
-                }}
-              >
-                <FontAwesome name="times-circle" size={20} color={colors.error} />
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Content */}
-          <TextInput
-            style={[styles.contentInput, { color: colors.text }]}
-            placeholder="Write your thoughts..."
-            placeholderTextColor={colors.textMuted}
-            value={content}
-            onChangeText={setContent}
-            multiline
-            textAlignVertical="top"
-            scrollEnabled={false}
-            onContentSizeChange={(e) => {
-              // Scroll to keep the cursor visible as the user types onto new lines
-              const contentHeight = e.nativeEvent.contentSize.height;
-              if (contentHeight > 200) {
-                scrollViewRef.current?.scrollToEnd({ animated: true });
+        {/* Existing Voice Memo (edit mode) */}
+        {existingVoiceMemo && !deleteExistingVoiceMemo && !pendingVoiceMemo && (
+          <View
+            style={[
+              styles.voiceMemoCard,
+              { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+            ]}
+          >
+            <TouchableOpacity
+              onPress={() =>
+                voiceMemo.isPlaying
+                  ? voiceMemo.pauseAudio()
+                  : voiceMemo.playAudio(existingVoiceMemo.signedUrl!)
               }
-            }}
-          />
-        </Pressable>
+              disabled={!existingVoiceMemo.signedUrl}
+            >
+              <FontAwesome
+                name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
+                size={32}
+                color={colors.primary}
+              />
+            </TouchableOpacity>
+            <View style={styles.voiceMemoInfo}>
+              <Text style={[styles.voiceMemoLabel, { color: colors.text }]}>Voice Memo</Text>
+              <Text style={[styles.voiceMemoDuration, { color: colors.textMuted }]}>
+                {voiceMemo.isPlaying
+                  ? formatDuration(voiceMemo.playbackPositionSecs * 1000)
+                  : formatDuration(existingVoiceMemo.duration_ms || 0)}
+                {' / '}
+                {formatDuration(existingVoiceMemo.duration_ms || 0)}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                voiceMemo.stopPlayback();
+                setDeleteExistingVoiceMemo(true);
+              }}
+            >
+              <FontAwesome name="times-circle" size={20} color={colors.error} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Pending Voice Memo (new recording) */}
+        {pendingVoiceMemo && (
+          <View
+            style={[
+              styles.voiceMemoCard,
+              { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+            ]}
+          >
+            <TouchableOpacity
+              onPress={() =>
+                voiceMemo.isPlaying
+                  ? voiceMemo.pauseAudio()
+                  : voiceMemo.playAudio(pendingVoiceMemo.uri)
+              }
+            >
+              <FontAwesome
+                name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
+                size={32}
+                color={colors.primary}
+              />
+            </TouchableOpacity>
+            <View style={styles.voiceMemoInfo}>
+              <Text style={[styles.voiceMemoLabel, { color: colors.text }]}>Voice Memo</Text>
+              <Text style={[styles.voiceMemoDuration, { color: colors.textMuted }]}>
+                {voiceMemo.isPlaying
+                  ? formatDuration(voiceMemo.playbackPositionSecs * 1000)
+                  : formatDuration(pendingVoiceMemo.durationMs)}
+                {' / '}
+                {formatDuration(pendingVoiceMemo.durationMs)}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                voiceMemo.stopPlayback();
+                voiceMemo.resetRecording();
+                setPendingVoiceMemo(null);
+              }}
+            >
+              <FontAwesome name="times-circle" size={20} color={colors.error} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Content */}
+        <TextInput
+          style={[styles.contentInput, { color: colors.text }]}
+          placeholder="Write your thoughts..."
+          placeholderTextColor={colors.textMuted}
+          value={content}
+          onChangeText={setContent}
+          multiline
+          textAlignVertical="top"
+          scrollEnabled={false}
+          onContentSizeChange={(e) => {
+            // Scroll to keep the cursor visible as the user types onto new lines
+            const contentHeight = e.nativeEvent.contentSize.height;
+            if (contentHeight > 200) {
+              scrollViewRef.current?.scrollToEnd({ animated: true });
+            }
+          }}
+        />
       </ScrollView>
 
       {/* Recording Indicator */}
@@ -599,13 +870,13 @@ export default function NewEntryScreen() {
           <TouchableOpacity
             style={styles.toolbarButton}
             onPress={
-              pendingVoiceMemo
+              hasMemo
                 ? undefined
                 : voiceMemo.isRecording
                   ? voiceMemo.stopRecording
                   : voiceMemo.startRecording
             }
-            disabled={!!pendingVoiceMemo}
+            disabled={hasMemo}
           >
             <FontAwesome
               name="microphone"
@@ -613,7 +884,7 @@ export default function NewEntryScreen() {
               color={
                 voiceMemo.isRecording
                   ? colors.error
-                  : pendingVoiceMemo
+                  : hasMemo
                     ? colors.primary
                     : colors.textSecondary
               }
@@ -621,21 +892,25 @@ export default function NewEntryScreen() {
           </TouchableOpacity>
         </View>
         <View style={styles.toolbarRight}>
-          <TouchableOpacity
-            style={[styles.draftButton, { borderColor: colors.border }]}
-            onPress={() => handleSave(true)}
-            disabled={saving}
-          >
-            <Text style={[styles.draftButtonText, { color: colors.textSecondary }]}>
-              Save Draft
-            </Text>
-          </TouchableOpacity>
+          {!isEditMode && (
+            <TouchableOpacity
+              style={[styles.draftButton, { borderColor: colors.border }]}
+              onPress={() => handleSave(true)}
+              disabled={saving}
+            >
+              <Text style={[styles.draftButtonText, { color: colors.textSecondary }]}>
+                Save Draft
+              </Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={[styles.publishButton, { backgroundColor: colors.primary }]}
             onPress={() => handleSave(false)}
             disabled={saving}
           >
-            <Text style={styles.publishButtonText}>{saving ? 'Saving...' : 'Publish'}</Text>
+            <Text style={styles.publishButtonText}>
+              {saving ? 'Saving...' : isEditMode ? 'Save Changes' : 'Publish'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
