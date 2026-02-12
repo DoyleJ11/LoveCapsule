@@ -8,8 +8,10 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   useColorScheme,
   ActionSheetIOS,
   Modal,
@@ -80,6 +82,7 @@ export default function NewEntryScreen() {
   const [locationSearching, setLocationSearching] = useState(false);
   const [locationResults, setLocationResults] = useState<LocationResult[]>([]);
   const savedSuccessfully = useRef(false);
+  const scrollViewRef = useRef<ScrollView>(null);
   const locationSearchRef = useRef<TextInput>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -171,6 +174,7 @@ export default function NewEntryScreen() {
   }, [navigation, hasContent, colors.primary]);
 
   const handleSave = async (isDraft: boolean) => {
+    Keyboard.dismiss();
     if (!couple) {
       Alert.alert('Error', 'You need to pair with a partner first');
       return;
@@ -380,171 +384,183 @@ export default function NewEntryScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
+        ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
       >
-        {/* Title */}
-        <TextInput
-          style={[styles.titleInput, { color: colors.text, borderBottomColor: colors.border }]}
-          placeholder="Entry title..."
-          placeholderTextColor={colors.textMuted}
-          value={title}
-          onChangeText={setTitle}
-          autoFocus
-        />
-
-        {/* Date Selector - when the entry's event took place */}
-        <TouchableOpacity
-          style={styles.datePickerRow}
-          onPress={() => setShowDatePicker(!showDatePicker)}
-        >
-          <FontAwesome name="calendar" size={14} color={colors.primary} />
-          <Text style={[styles.datePickerText, { color: colors.text }]}>
-            {formatEntryDate(entryDate)}
-          </Text>
-          <FontAwesome
-            name={showDatePicker ? 'chevron-up' : 'chevron-down'}
-            size={10}
-            color={colors.textMuted}
+        <Pressable onPress={Keyboard.dismiss} accessible={false}>
+          {/* Title */}
+          <TextInput
+            style={[styles.titleInput, { color: colors.text, borderBottomColor: colors.border }]}
+            placeholder="Entry title..."
+            placeholderTextColor={colors.textMuted}
+            value={title}
+            onChangeText={setTitle}
           />
-        </TouchableOpacity>
-        {showDatePicker && (
-          <DateTimePicker
-            value={new Date(entryDate + 'T12:00:00')}
-            mode="date"
-            display="inline"
-            maximumDate={new Date()}
-            onChange={handleDateChange}
-          />
-        )}
 
-        {/* Mood Selector */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.moodScroll}
-          contentContainerStyle={styles.moodContainer}
-        >
-          {Moods.map((m) => (
-            <TouchableOpacity
-              key={m.key}
-              style={[
-                styles.moodChip,
-                {
-                  backgroundColor: mood === m.key ? colors.primary + '20' : colors.surfaceSecondary,
-                  borderColor: mood === m.key ? colors.primary : colors.border,
-                },
-              ]}
-              onPress={() => setMood(mood === m.key ? null : m.key)}
-            >
-              <Text style={styles.moodChipEmoji}>{m.emoji}</Text>
-              <Text
-                style={[
-                  styles.moodChipLabel,
-                  { color: mood === m.key ? colors.primary : colors.textSecondary },
-                ]}
-              >
-                {m.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {/* Location */}
-        {locationName ? (
-          <View style={[styles.locationDisplay, { backgroundColor: colors.surfaceSecondary }]}>
-            <FontAwesome name="map-marker" size={14} color={colors.primary} />
-            <Text style={[styles.locationDisplayText, { color: colors.text }]} numberOfLines={1}>
-              {locationName}
+          {/* Date Selector - when the entry's event took place */}
+          <TouchableOpacity
+            style={styles.datePickerRow}
+            onPress={() => setShowDatePicker(!showDatePicker)}
+          >
+            <FontAwesome name="calendar" size={14} color={colors.primary} />
+            <Text style={[styles.datePickerText, { color: colors.text }]}>
+              {formatEntryDate(entryDate)}
             </Text>
-            <TouchableOpacity
-              onPress={() => {
-                setLocationName(null);
-                setLocationLat(null);
-                setLocationLng(null);
-              }}
-            >
-              <FontAwesome name="times" size={14} color={colors.textMuted} />
-            </TouchableOpacity>
-          </View>
-        ) : null}
+            <FontAwesome
+              name={showDatePicker ? 'chevron-up' : 'chevron-down'}
+              size={10}
+              color={colors.textMuted}
+            />
+          </TouchableOpacity>
+          {showDatePicker && (
+            <DateTimePicker
+              value={new Date(entryDate + 'T12:00:00')}
+              mode="date"
+              display="inline"
+              maximumDate={new Date()}
+              onChange={handleDateChange}
+            />
+          )}
 
-        {/* Pending Images */}
-        {pendingImages.length > 0 && (
+          {/* Mood Selector */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            style={styles.imageScroll}
-            contentContainerStyle={styles.imageScrollContent}
+            style={styles.moodScroll}
+            contentContainerStyle={styles.moodContainer}
           >
-            {pendingImages.map((asset, index) => (
-              <View key={index} style={styles.imageThumbContainer}>
-                <Image source={{ uri: asset.uri }} style={styles.imageThumb} />
-                <TouchableOpacity
-                  style={styles.imageRemoveButton}
-                  onPress={() => setPendingImages((prev) => prev.filter((_, i) => i !== index))}
+            {Moods.map((m) => (
+              <TouchableOpacity
+                key={m.key}
+                style={[
+                  styles.moodChip,
+                  {
+                    backgroundColor:
+                      mood === m.key ? colors.primary + '20' : colors.surfaceSecondary,
+                    borderColor: mood === m.key ? colors.primary : colors.border,
+                  },
+                ]}
+                onPress={() => setMood(mood === m.key ? null : m.key)}
+              >
+                <Text style={styles.moodChipEmoji}>{m.emoji}</Text>
+                <Text
+                  style={[
+                    styles.moodChipLabel,
+                    { color: mood === m.key ? colors.primary : colors.textSecondary },
+                  ]}
                 >
-                  <FontAwesome name="times-circle" size={20} color={colors.error} />
-                </TouchableOpacity>
-              </View>
+                  {m.label}
+                </Text>
+              </TouchableOpacity>
             ))}
           </ScrollView>
-        )}
 
-        {/* Voice Memo */}
-        {pendingVoiceMemo && (
-          <View
-            style={[
-              styles.voiceMemoCard,
-              { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
-            ]}
-          >
-            <TouchableOpacity
-              onPress={() =>
-                voiceMemo.isPlaying
-                  ? voiceMemo.pauseAudio()
-                  : voiceMemo.playAudio(pendingVoiceMemo.uri)
-              }
-            >
-              <FontAwesome
-                name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
-                size={32}
-                color={colors.primary}
-              />
-            </TouchableOpacity>
-            <View style={styles.voiceMemoInfo}>
-              <Text style={[styles.voiceMemoLabel, { color: colors.text }]}>Voice Memo</Text>
-              <Text style={[styles.voiceMemoDuration, { color: colors.textMuted }]}>
-                {voiceMemo.isPlaying
-                  ? formatDuration(voiceMemo.playbackPositionSecs * 1000)
-                  : formatDuration(pendingVoiceMemo.durationMs)}
-                {' / '}
-                {formatDuration(pendingVoiceMemo.durationMs)}
+          {/* Location */}
+          {locationName ? (
+            <View style={[styles.locationDisplay, { backgroundColor: colors.surfaceSecondary }]}>
+              <FontAwesome name="map-marker" size={14} color={colors.primary} />
+              <Text style={[styles.locationDisplayText, { color: colors.text }]} numberOfLines={1}>
+                {locationName}
               </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setLocationName(null);
+                  setLocationLat(null);
+                  setLocationLng(null);
+                }}
+              >
+                <FontAwesome name="times" size={14} color={colors.textMuted} />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              onPress={() => {
-                voiceMemo.stopPlayback();
-                voiceMemo.resetRecording();
-                setPendingVoiceMemo(null);
-              }}
-            >
-              <FontAwesome name="times-circle" size={20} color={colors.error} />
-            </TouchableOpacity>
-          </View>
-        )}
+          ) : null}
 
-        {/* Content */}
-        <TextInput
-          style={[styles.contentInput, { color: colors.text }]}
-          placeholder="Write your thoughts..."
-          placeholderTextColor={colors.textMuted}
-          value={content}
-          onChangeText={setContent}
-          multiline
-          textAlignVertical="top"
-        />
+          {/* Pending Images */}
+          {pendingImages.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.imageScroll}
+              contentContainerStyle={styles.imageScrollContent}
+            >
+              {pendingImages.map((asset, index) => (
+                <View key={index} style={styles.imageThumbContainer}>
+                  <Image source={{ uri: asset.uri }} style={styles.imageThumb} />
+                  <TouchableOpacity
+                    style={styles.imageRemoveButton}
+                    onPress={() => setPendingImages((prev) => prev.filter((_, i) => i !== index))}
+                  >
+                    <FontAwesome name="times-circle" size={20} color={colors.error} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+
+          {/* Voice Memo */}
+          {pendingVoiceMemo && (
+            <View
+              style={[
+                styles.voiceMemoCard,
+                { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+              ]}
+            >
+              <TouchableOpacity
+                onPress={() =>
+                  voiceMemo.isPlaying
+                    ? voiceMemo.pauseAudio()
+                    : voiceMemo.playAudio(pendingVoiceMemo.uri)
+                }
+              >
+                <FontAwesome
+                  name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
+                  size={32}
+                  color={colors.primary}
+                />
+              </TouchableOpacity>
+              <View style={styles.voiceMemoInfo}>
+                <Text style={[styles.voiceMemoLabel, { color: colors.text }]}>Voice Memo</Text>
+                <Text style={[styles.voiceMemoDuration, { color: colors.textMuted }]}>
+                  {voiceMemo.isPlaying
+                    ? formatDuration(voiceMemo.playbackPositionSecs * 1000)
+                    : formatDuration(pendingVoiceMemo.durationMs)}
+                  {' / '}
+                  {formatDuration(pendingVoiceMemo.durationMs)}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  voiceMemo.stopPlayback();
+                  voiceMemo.resetRecording();
+                  setPendingVoiceMemo(null);
+                }}
+              >
+                <FontAwesome name="times-circle" size={20} color={colors.error} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Content */}
+          <TextInput
+            style={[styles.contentInput, { color: colors.text }]}
+            placeholder="Write your thoughts..."
+            placeholderTextColor={colors.textMuted}
+            value={content}
+            onChangeText={setContent}
+            multiline
+            textAlignVertical="top"
+            scrollEnabled={false}
+            onContentSizeChange={(e) => {
+              // Scroll to keep the cursor visible as the user types onto new lines
+              const contentHeight = e.nativeEvent.contentSize.height;
+              if (contentHeight > 200) {
+                scrollViewRef.current?.scrollToEnd({ animated: true });
+              }
+            }}
+          />
+        </Pressable>
       </ScrollView>
 
       {/* Recording Indicator */}

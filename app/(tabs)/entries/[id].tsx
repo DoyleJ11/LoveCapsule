@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,10 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Keyboard,
+  KeyboardAvoidingView,
   Platform,
+  Pressable,
   ActionSheetIOS,
   useColorScheme,
 } from 'react-native';
@@ -45,6 +48,7 @@ export default function EntryDetailScreen() {
   const [editContent, setEditContent] = useState('');
   const [editEntryDate, setEditEntryDate] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     fetchEntry();
@@ -173,6 +177,7 @@ export default function EntryDetailScreen() {
   const audioMedia = media.find((m) => m.media_type === 'audio');
 
   const handleSave = async () => {
+    Keyboard.dismiss();
     if (!entry) return;
 
     try {
@@ -227,267 +232,297 @@ export default function EntryDetailScreen() {
   }
 
   return (
-    <ScrollView
+    <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
-      contentContainerStyle={styles.content}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      {/* Meta info */}
-      <View style={styles.metaRow}>
-        <Text style={[styles.date, { color: colors.textMuted }]}>
-          {formatEntryDate(entry.entry_date)}
-        </Text>
-        {entry.is_draft && (
-          <View style={[styles.draftBadge, { backgroundColor: colors.warning + '20' }]}>
-            <Text style={[styles.draftBadgeText, { color: colors.warning }]}>Draft</Text>
-          </View>
-        )}
-        {mood && (
-          <Text style={styles.moodEmoji}>
-            {mood.emoji} {mood.label}
-          </Text>
-        )}
-      </View>
-
-      {/* Location */}
-      {entry.location_name && (
-        <View style={styles.locationRow}>
-          <FontAwesome name="map-marker" size={14} color={colors.primary} />
-          <Text style={[styles.locationText, { color: colors.textSecondary }]}>
-            {entry.location_name}
-          </Text>
-        </View>
-      )}
-
-      {/* Title & Content */}
-      {editing ? (
-        <>
-          {/* Date Selector */}
-          <TouchableOpacity
-            style={styles.datePickerRow}
-            onPress={() => setShowDatePicker(!showDatePicker)}
-          >
-            <FontAwesome name="calendar" size={14} color={colors.primary} />
-            <Text style={[styles.datePickerText, { color: colors.text }]}>
-              {formatEntryDate(editEntryDate)}
+      <ScrollView
+        ref={scrollViewRef}
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+      >
+        <Pressable onPress={Keyboard.dismiss} accessible={false}>
+          {/* Meta info */}
+          <View style={styles.metaRow}>
+            <Text style={[styles.date, { color: colors.textMuted }]}>
+              {formatEntryDate(entry.entry_date)}
             </Text>
-            <FontAwesome
-              name={showDatePicker ? 'chevron-up' : 'chevron-down'}
-              size={10}
-              color={colors.textMuted}
-            />
-          </TouchableOpacity>
-          {showDatePicker && (
-            <DateTimePicker
-              value={new Date(editEntryDate + 'T12:00:00')}
-              mode="date"
-              display="inline"
-              maximumDate={new Date()}
-              onChange={(_: unknown, selectedDate?: Date) => {
-                if (Platform.OS === 'android') setShowDatePicker(false);
-                if (selectedDate) {
-                  setEditEntryDate(selectedDate.toISOString().split('T')[0]);
-                }
-              }}
-            />
+            {entry.is_draft && (
+              <View style={[styles.draftBadge, { backgroundColor: colors.warning + '20' }]}>
+                <Text style={[styles.draftBadgeText, { color: colors.warning }]}>Draft</Text>
+              </View>
+            )}
+            {mood && (
+              <Text style={styles.moodEmoji}>
+                {mood.emoji} {mood.label}
+              </Text>
+            )}
+          </View>
+
+          {/* Location */}
+          {entry.location_name && (
+            <View style={styles.locationRow}>
+              <FontAwesome name="map-marker" size={14} color={colors.primary} />
+              <Text style={[styles.locationText, { color: colors.textSecondary }]}>
+                {entry.location_name}
+              </Text>
+            </View>
           )}
 
-          <TextInput
-            style={[styles.editTitle, { color: colors.text, borderBottomColor: colors.border }]}
-            value={editTitle}
-            onChangeText={setEditTitle}
-            placeholder="Title..."
-            placeholderTextColor={colors.textMuted}
-          />
-          <TextInput
-            style={[styles.editContent, { color: colors.text }]}
-            value={editContent}
-            onChangeText={setEditContent}
-            multiline
-            textAlignVertical="top"
-            placeholder="Write your thoughts..."
-            placeholderTextColor={colors.textMuted}
-          />
+          {/* Title & Content */}
+          {editing ? (
+            <>
+              {/* Date Selector */}
+              <TouchableOpacity
+                style={styles.datePickerRow}
+                onPress={() => setShowDatePicker(!showDatePicker)}
+              >
+                <FontAwesome name="calendar" size={14} color={colors.primary} />
+                <Text style={[styles.datePickerText, { color: colors.text }]}>
+                  {formatEntryDate(editEntryDate)}
+                </Text>
+                <FontAwesome
+                  name={showDatePicker ? 'chevron-up' : 'chevron-down'}
+                  size={10}
+                  color={colors.textMuted}
+                />
+              </TouchableOpacity>
+              {showDatePicker && (
+                <DateTimePicker
+                  value={new Date(editEntryDate + 'T12:00:00')}
+                  mode="date"
+                  display="inline"
+                  maximumDate={new Date()}
+                  onChange={(_: unknown, selectedDate?: Date) => {
+                    if (Platform.OS === 'android') setShowDatePicker(false);
+                    if (selectedDate) {
+                      setEditEntryDate(selectedDate.toISOString().split('T')[0]);
+                    }
+                  }}
+                />
+              )}
 
-          {/* Media in edit mode */}
-          {imageMedia.length > 0 && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.mediaScroll}
-              contentContainerStyle={styles.mediaScrollContent}
-            >
-              {imageMedia.map((m) => (
-                <View key={m.id} style={styles.mediaThumbContainer}>
-                  {m.signedUrl && <Image source={{ uri: m.signedUrl }} style={styles.mediaThumb} />}
+              <TextInput
+                style={[styles.editTitle, { color: colors.text, borderBottomColor: colors.border }]}
+                value={editTitle}
+                onChangeText={setEditTitle}
+                placeholder="Title..."
+                placeholderTextColor={colors.textMuted}
+              />
+              <TextInput
+                style={[styles.editContent, { color: colors.text }]}
+                value={editContent}
+                onChangeText={setEditContent}
+                multiline
+                textAlignVertical="top"
+                scrollEnabled={false}
+                placeholder="Write your thoughts..."
+                placeholderTextColor={colors.textMuted}
+                onContentSizeChange={(e) => {
+                  const contentHeight = e.nativeEvent.contentSize.height;
+                  if (contentHeight > 200) {
+                    scrollViewRef.current?.scrollToEnd({ animated: true });
+                  }
+                }}
+              />
+
+              {/* Media in edit mode */}
+              {imageMedia.length > 0 && (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.mediaScroll}
+                  contentContainerStyle={styles.mediaScrollContent}
+                >
+                  {imageMedia.map((m) => (
+                    <View key={m.id} style={styles.mediaThumbContainer}>
+                      {m.signedUrl && (
+                        <Image source={{ uri: m.signedUrl }} style={styles.mediaThumb} />
+                      )}
+                      {isOwner && (
+                        <TouchableOpacity
+                          style={styles.mediaRemoveButton}
+                          onPress={() => handleDeleteMedia(m)}
+                        >
+                          <FontAwesome name="times-circle" size={20} color={colors.error} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+
+              {/* Add image button in edit mode */}
+              <TouchableOpacity
+                style={[styles.addImageButton, { borderColor: colors.border }]}
+                onPress={handleAddImageToEntry}
+              >
+                <FontAwesome name="image" size={16} color={colors.textSecondary} />
+                <Text style={[styles.addImageText, { color: colors.textSecondary }]}>
+                  Add Image
+                </Text>
+              </TouchableOpacity>
+
+              {/* Voice memo in edit mode */}
+              {audioMedia && audioMedia.signedUrl && (
+                <View
+                  style={[
+                    styles.audioPlayerCard,
+                    { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+                  ]}
+                >
+                  <TouchableOpacity
+                    onPress={() =>
+                      voiceMemo.isPlaying
+                        ? voiceMemo.pauseAudio()
+                        : voiceMemo.playAudio(audioMedia.signedUrl)
+                    }
+                  >
+                    <FontAwesome
+                      name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
+                      size={28}
+                      color={colors.primary}
+                    />
+                  </TouchableOpacity>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.audioPlayerLabel, { color: colors.text }]}>
+                      Voice Memo
+                    </Text>
+                    <Text style={[styles.audioPlayerDuration, { color: colors.textMuted }]}>
+                      {formatDuration(audioMedia.duration_ms || 0)}
+                    </Text>
+                  </View>
                   {isOwner && (
-                    <TouchableOpacity
-                      style={styles.mediaRemoveButton}
-                      onPress={() => handleDeleteMedia(m)}
-                    >
+                    <TouchableOpacity onPress={() => handleDeleteMedia(audioMedia)}>
                       <FontAwesome name="times-circle" size={20} color={colors.error} />
                     </TouchableOpacity>
                   )}
                 </View>
-              ))}
-            </ScrollView>
-          )}
-
-          {/* Add image button in edit mode */}
-          <TouchableOpacity
-            style={[styles.addImageButton, { borderColor: colors.border }]}
-            onPress={handleAddImageToEntry}
-          >
-            <FontAwesome name="image" size={16} color={colors.textSecondary} />
-            <Text style={[styles.addImageText, { color: colors.textSecondary }]}>Add Image</Text>
-          </TouchableOpacity>
-
-          {/* Voice memo in edit mode */}
-          {audioMedia && audioMedia.signedUrl && (
-            <View
-              style={[
-                styles.audioPlayerCard,
-                { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
-              ]}
-            >
-              <TouchableOpacity
-                onPress={() =>
-                  voiceMemo.isPlaying
-                    ? voiceMemo.pauseAudio()
-                    : voiceMemo.playAudio(audioMedia.signedUrl)
-                }
-              >
-                <FontAwesome
-                  name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
-                  size={28}
-                  color={colors.primary}
-                />
-              </TouchableOpacity>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.audioPlayerLabel, { color: colors.text }]}>Voice Memo</Text>
-                <Text style={[styles.audioPlayerDuration, { color: colors.textMuted }]}>
-                  {formatDuration(audioMedia.duration_ms || 0)}
-                </Text>
-              </View>
-              {isOwner && (
-                <TouchableOpacity onPress={() => handleDeleteMedia(audioMedia)}>
-                  <FontAwesome name="times-circle" size={20} color={colors.error} />
-                </TouchableOpacity>
               )}
-            </View>
-          )}
 
-          <View style={styles.editActions}>
-            <TouchableOpacity
-              style={[styles.cancelButton, { borderColor: colors.border }]}
-              onPress={() => {
-                setEditTitle(entry.title);
-                setEditContent(entry.content_plain);
-                setEditEntryDate(entry.entry_date);
-                setShowDatePicker(false);
-                voiceMemo.stopPlayback();
-                setEditing(false);
-              }}
-            >
-              <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.saveButton, { backgroundColor: colors.primary }]}
-              onPress={handleSave}
-            >
-              <Text style={styles.saveButtonText}>Save Changes</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      ) : (
-        <>
-          <Text style={[styles.title, { color: colors.text }]}>
-            {entry.title || 'Untitled Entry'}
-          </Text>
-          <Text style={[styles.body, { color: colors.text }]}>{entry.content_plain}</Text>
-
-          {/* Entry Images */}
-          {imageMedia.length > 0 && (
-            <View style={styles.mediaGallery}>
-              {imageMedia.map((m) =>
-                m.signedUrl ? (
-                  <Image
-                    key={m.id}
-                    source={{ uri: m.signedUrl }}
-                    style={styles.mediaImage}
-                    resizeMode="cover"
-                  />
-                ) : null
-              )}
-            </View>
-          )}
-
-          {/* Voice Memo Player */}
-          {audioMedia && audioMedia.signedUrl && (
-            <View
-              style={[
-                styles.audioPlayerCard,
-                { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
-              ]}
-            >
-              <TouchableOpacity
-                onPress={() =>
-                  voiceMemo.isPlaying
-                    ? voiceMemo.pauseAudio()
-                    : voiceMemo.playAudio(audioMedia.signedUrl)
-                }
-              >
-                <FontAwesome
-                  name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
-                  size={36}
-                  color={colors.primary}
-                />
-              </TouchableOpacity>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.audioPlayerLabel, { color: colors.text }]}>Voice Memo</Text>
-                <Text style={[styles.audioPlayerDuration, { color: colors.textMuted }]}>
-                  {voiceMemo.isPlaying
-                    ? formatDuration(voiceMemo.playbackPositionSecs * 1000)
-                    : formatDuration(audioMedia.duration_ms || 0)}
-                  {audioMedia.duration_ms ? ` / ${formatDuration(audioMedia.duration_ms)}` : ''}
-                </Text>
-              </View>
-            </View>
-          )}
-
-          <Text style={[styles.wordCount, { color: colors.textMuted }]}>
-            {entry.word_count} {entry.word_count === 1 ? 'word' : 'words'}
-          </Text>
-
-          {/* Actions (only for owner) */}
-          {isOwner && (
-            <View style={styles.actions}>
-              {entry.is_draft && (
+              <View style={styles.editActions}>
                 <TouchableOpacity
-                  style={[styles.publishButton, { backgroundColor: colors.accent }]}
-                  onPress={handlePublish}
+                  style={[styles.cancelButton, { borderColor: colors.border }]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setEditTitle(entry.title);
+                    setEditContent(entry.content_plain);
+                    setEditEntryDate(entry.entry_date);
+                    setShowDatePicker(false);
+                    voiceMemo.stopPlayback();
+                    setEditing(false);
+                  }}
                 >
-                  <Text style={styles.publishButtonText}>Publish Entry</Text>
+                  <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>
+                    Cancel
+                  </Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveButton, { backgroundColor: colors.primary }]}
+                  onPress={handleSave}
+                >
+                  <Text style={styles.saveButtonText}>Save Changes</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={[styles.title, { color: colors.text }]}>
+                {entry.title || 'Untitled Entry'}
+              </Text>
+              <Text style={[styles.body, { color: colors.text }]}>{entry.content_plain}</Text>
+
+              {/* Entry Images */}
+              {imageMedia.length > 0 && (
+                <View style={styles.mediaGallery}>
+                  {imageMedia.map((m) =>
+                    m.signedUrl ? (
+                      <Image
+                        key={m.id}
+                        source={{ uri: m.signedUrl }}
+                        style={styles.mediaImage}
+                        resizeMode="cover"
+                      />
+                    ) : null
+                  )}
+                </View>
               )}
-              <TouchableOpacity
-                style={[styles.editButton, { borderColor: colors.border }]}
-                onPress={() => setEditing(true)}
-              >
-                <FontAwesome name="pencil" size={16} color={colors.textSecondary} />
-                <Text style={[styles.editButtonText, { color: colors.textSecondary }]}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.deleteButton, { borderColor: colors.error }]}
-                onPress={handleDelete}
-              >
-                <FontAwesome name="trash" size={16} color={colors.error} />
-                <Text style={[styles.deleteButtonText, { color: colors.error }]}>Delete</Text>
-              </TouchableOpacity>
-            </View>
+
+              {/* Voice Memo Player */}
+              {audioMedia && audioMedia.signedUrl && (
+                <View
+                  style={[
+                    styles.audioPlayerCard,
+                    { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
+                  ]}
+                >
+                  <TouchableOpacity
+                    onPress={() =>
+                      voiceMemo.isPlaying
+                        ? voiceMemo.pauseAudio()
+                        : voiceMemo.playAudio(audioMedia.signedUrl)
+                    }
+                  >
+                    <FontAwesome
+                      name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
+                      size={36}
+                      color={colors.primary}
+                    />
+                  </TouchableOpacity>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.audioPlayerLabel, { color: colors.text }]}>
+                      Voice Memo
+                    </Text>
+                    <Text style={[styles.audioPlayerDuration, { color: colors.textMuted }]}>
+                      {voiceMemo.isPlaying
+                        ? formatDuration(voiceMemo.playbackPositionSecs * 1000)
+                        : formatDuration(audioMedia.duration_ms || 0)}
+                      {audioMedia.duration_ms ? ` / ${formatDuration(audioMedia.duration_ms)}` : ''}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              <Text style={[styles.wordCount, { color: colors.textMuted }]}>
+                {entry.word_count} {entry.word_count === 1 ? 'word' : 'words'}
+              </Text>
+
+              {/* Actions (only for owner) */}
+              {isOwner && (
+                <View style={styles.actions}>
+                  {entry.is_draft && (
+                    <TouchableOpacity
+                      style={[styles.publishButton, { backgroundColor: colors.accent }]}
+                      onPress={handlePublish}
+                    >
+                      <Text style={styles.publishButtonText}>Publish Entry</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    style={[styles.editButton, { borderColor: colors.border }]}
+                    onPress={() => setEditing(true)}
+                  >
+                    <FontAwesome name="pencil" size={16} color={colors.textSecondary} />
+                    <Text style={[styles.editButtonText, { color: colors.textSecondary }]}>
+                      Edit
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.deleteButton, { borderColor: colors.error }]}
+                    onPress={handleDelete}
+                  >
+                    <FontAwesome name="trash" size={16} color={colors.error} />
+                    <Text style={[styles.deleteButtonText, { color: colors.error }]}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </>
           )}
-        </>
-      )}
-    </ScrollView>
+        </Pressable>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
