@@ -15,6 +15,7 @@ export interface Couple {
   partner_2_id: string | null;
   is_revealed: boolean;
   last_reveal_year: number | null;
+  valentine_surprise_triggered: boolean;
   created_at: string;
   updated_at: string;
 }
