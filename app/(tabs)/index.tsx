@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useColorScheme } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useAuth } from '../../src/providers/AuthProvider';
 import { useCouple } from '../../src/providers/CoupleProvider';
 import { useEntries } from '../../src/hooks/useEntries';
+import { entryEvents } from '../../src/lib/entryEvents';
 import { supabase } from '../../src/lib/supabase';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../src/constants/theme';
 
@@ -17,19 +19,37 @@ export default function HomeScreen() {
     isRevealReady,
     loading: coupleLoading,
   } = useCouple();
-  const { entries, loading: entriesLoading } = useEntries(couple?.id);
+  const { entries, refresh: refreshEntries } = useEntries(couple?.id);
   const [partnerEntryCount, setPartnerEntryCount] = useState<number>(0);
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
 
-  useEffect(() => {
-    if (couple?.id) {
-      supabase.rpc('get_partner_entry_count', { p_couple_id: couple.id }).then(({ data }) => {
+  const coupleId = couple?.id;
+
+  const fetchPartnerCount = useCallback(() => {
+    if (coupleId) {
+      supabase.rpc('get_partner_entry_count', { p_couple_id: coupleId }).then(({ data }) => {
         if (data !== null) setPartnerEntryCount(data);
       });
     }
-  }, [couple?.id]);
+  }, [coupleId]);
+
+  // Refresh entries and partner count when Home tab gains focus
+  useFocusEffect(
+    useCallback(() => {
+      if (coupleId) refreshEntries();
+      fetchPartnerCount();
+    }, [coupleId, refreshEntries, fetchPartnerCount])
+  );
+
+  // Also refresh partner count when any entry mutation happens anywhere
+  useEffect(() => {
+    const unsubscribe = entryEvents.subscribe(() => {
+      fetchPartnerCount();
+    });
+    return unsubscribe;
+  }, [fetchPartnerCount]);
 
   const publishedEntries = entries.filter((e) => !e.is_draft);
   const totalWords = publishedEntries.reduce((sum, e) => sum + e.word_count, 0);

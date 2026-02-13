@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../providers/AuthProvider';
+import { entryEvents } from '../lib/entryEvents';
 import type { Entry } from '../types/database';
 
 interface UseEntriesReturn {
@@ -28,7 +29,10 @@ export interface CreateEntryInput {
 }
 
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function countWords(text: string): number {
@@ -75,6 +79,22 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
     fetchEntries();
   }, [fetchEntries]);
 
+  // Listen for entry-change events fired by OTHER useEntries instances
+  // so that all screens stay in sync after mutations.
+  const isLocalMutation = useRef(false);
+
+  useEffect(() => {
+    const unsubscribe = entryEvents.subscribe(() => {
+      // Skip if this instance triggered the event (it already refreshed)
+      if (isLocalMutation.current) {
+        isLocalMutation.current = false;
+        return;
+      }
+      fetchEntries();
+    });
+    return unsubscribe;
+  }, [fetchEntries]);
+
   const createEntry = async (data: CreateEntryInput): Promise<Entry> => {
     if (!user) throw new Error('Not authenticated');
 
@@ -93,6 +113,8 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
 
     if (createError) throw createError;
     await fetchEntries();
+    isLocalMutation.current = true;
+    entryEvents.emit();
     return entry;
   };
 
@@ -105,23 +127,21 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
       updateData.word_count = word_count;
     }
 
-    const { error: updateError } = await supabase
-      .from('entries')
-      .update(updateData)
-      .eq('id', id);
+    const { error: updateError } = await supabase.from('entries').update(updateData).eq('id', id);
 
     if (updateError) throw updateError;
     await fetchEntries();
+    isLocalMutation.current = true;
+    entryEvents.emit();
   };
 
   const deleteEntry = async (id: string) => {
-    const { error: deleteError } = await supabase
-      .from('entries')
-      .delete()
-      .eq('id', id);
+    const { error: deleteError } = await supabase.from('entries').delete().eq('id', id);
 
     if (deleteError) throw deleteError;
     await fetchEntries();
+    isLocalMutation.current = true;
+    entryEvents.emit();
   };
 
   return {
