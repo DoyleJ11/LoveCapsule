@@ -177,8 +177,15 @@ describe('date-utils', () => {
       expect(formatCheckpointFrequency('semi_annual')).toBe('Every 6 months');
     });
 
-    it('formats specific date frequency', () => {
+    it('formats specific date frequency without date as fallback', () => {
       expect(formatCheckpointFrequency('specific_date')).toBe('Specific date');
+    });
+
+    it('formats specific date frequency with actual date', () => {
+      expect(formatCheckpointFrequency('specific_date', '2025-07-12')).toBe('July 12th');
+      expect(formatCheckpointFrequency('specific_date', '2025-01-01')).toBe('January 1st');
+      expect(formatCheckpointFrequency('specific_date', '2025-03-22')).toBe('March 22nd');
+      expect(formatCheckpointFrequency('specific_date', '2025-11-03')).toBe('November 3rd');
     });
   });
 

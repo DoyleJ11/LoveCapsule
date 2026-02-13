@@ -629,7 +629,7 @@ export default function SettingsScreen() {
                         {formatCheckpointDescription(config)}
                       </Text>
                       <Text style={[styles.checkpointItemSubtitle, { color: colors.textMuted }]}>
-                        {formatCheckpointFrequency(config.frequency)}
+                        {formatCheckpointFrequency(config.frequency, config.specific_date)}
                         {!config.is_active && ' (Paused)'}
                       </Text>
                     </View>

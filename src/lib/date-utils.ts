@@ -1,6 +1,7 @@
 import {
   differenceInDays,
   format,
+  getDate,
   setYear,
   isAfter,
   isBefore,
@@ -76,7 +77,10 @@ export function formatDuration(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-export function formatCheckpointFrequency(frequency: CheckpointFrequency): string {
+export function formatCheckpointFrequency(
+  frequency: CheckpointFrequency,
+  specificDate?: string | null
+): string {
   switch (frequency) {
     case 'monthly':
       return 'Monthly';
@@ -85,6 +89,12 @@ export function formatCheckpointFrequency(frequency: CheckpointFrequency): strin
     case 'semi_annual':
       return 'Every 6 months';
     case 'specific_date':
+      if (specificDate) {
+        const parsed = parseISO(specificDate);
+        const month = format(parsed, 'MMMM');
+        const day = getDate(parsed);
+        return `${month} ${getOrdinal(day)}`;
+      }
       return 'Specific date';
     default:
       return frequency;
