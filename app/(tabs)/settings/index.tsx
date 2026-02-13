@@ -32,7 +32,9 @@ import {
   getNextCheckpointDate,
   formatNextCheckpointDate,
 } from '../../../src/lib/date-utils';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../../src/constants/theme';
+import { VALENTINE_STORAGE_KEY } from '../../../src/lib/valentine';
 import type { CheckpointConfig, CheckpointFrequency } from '../../../src/types/database';
 
 const FREQUENCY_OPTIONS: { value: CheckpointFrequency; label: string }[] = [
@@ -338,6 +340,11 @@ export default function SettingsScreen() {
         },
       },
     ]);
+  };
+
+  const handleResetValentine = async () => {
+    await AsyncStorage.removeItem(VALENTINE_STORAGE_KEY);
+    Alert.alert('Done', 'Valentine surprise reset. Reload the app to see it again.');
   };
 
   return (
@@ -809,6 +816,24 @@ export default function SettingsScreen() {
           </ScrollView>
         </SafeAreaView>
       </Modal>
+
+      {/* Dev Tools (only in development) */}
+      {__DEV__ && (
+        <View
+          style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        >
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Dev Tools</Text>
+          <TouchableOpacity
+            style={[styles.signOutButton, { borderColor: colors.primary, marginTop: 0 }]}
+            onPress={handleResetValentine}
+          >
+            <FontAwesome name="refresh" size={16} color={colors.primary} />
+            <Text style={[styles.signOutText, { color: colors.primary }]}>
+              Reset Valentine Surprise
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Sign Out */}
       <TouchableOpacity

@@ -6,6 +6,7 @@ import { useColorScheme } from 'react-native';
 import 'react-native-reanimated';
 import { AuthProvider, useAuth } from '../src/providers/AuthProvider';
 import { CoupleProvider } from '../src/providers/CoupleProvider';
+import { ValentineSurprise } from '../src/components/ValentineSurprise';
 import { Colors } from '../src/constants/theme';
 
 export { ErrorBoundary } from 'expo-router';
@@ -67,6 +68,7 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <CoupleProvider>
+        <ValentineSurprise />
         <RootLayoutNav />
       </CoupleProvider>
     </AuthProvider>
