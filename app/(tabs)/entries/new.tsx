@@ -22,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
-import { useCouple } from '../../../src/hooks/useCouple';
+import { useCouple } from '../../../src/providers/CoupleProvider';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { useEntries, type CreateEntryInput } from '../../../src/hooks/useEntries';
 import { getSignedUrl, deleteMedia } from '../../../src/lib/storage';

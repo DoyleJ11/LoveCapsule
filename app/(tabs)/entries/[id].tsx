@@ -14,7 +14,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { supabase } from '../../../src/lib/supabase';
 import { useAuth } from '../../../src/providers/AuthProvider';
-import { useCouple } from '../../../src/hooks/useCouple';
+import { useCouple } from '../../../src/providers/CoupleProvider';
 import { useEntries } from '../../../src/hooks/useEntries';
 import { useVoiceMemo } from '../../../src/hooks/useVoiceMemo';
 import { formatEntryDate, formatDuration } from '../../../src/lib/date-utils';

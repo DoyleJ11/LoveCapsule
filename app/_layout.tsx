@@ -5,6 +5,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useColorScheme } from 'react-native';
 import 'react-native-reanimated';
 import { AuthProvider, useAuth } from '../src/providers/AuthProvider';
+import { CoupleProvider } from '../src/providers/CoupleProvider';
 import { Colors } from '../src/constants/theme';
 
 export { ErrorBoundary } from 'expo-router';
@@ -65,7 +66,9 @@ function RootLayoutNav() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <RootLayoutNav />
+      <CoupleProvider>
+        <RootLayoutNav />
+      </CoupleProvider>
     </AuthProvider>
   );
 }

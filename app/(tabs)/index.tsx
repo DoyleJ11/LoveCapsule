@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useColorScheme } 
 import { useRouter } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useAuth } from '../../src/providers/AuthProvider';
-import { useCouple } from '../../src/hooks/useCouple';
+import { useCouple } from '../../src/providers/CoupleProvider';
 import { useEntries } from '../../src/hooks/useEntries';
 import { supabase } from '../../src/lib/supabase';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../src/constants/theme';

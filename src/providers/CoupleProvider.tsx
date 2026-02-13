@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../providers/AuthProvider';
+import { getSignedUrl } from '../lib/storage';
+import { useAuth } from './AuthProvider';
 import type { Couple, Profile } from '../types/database';
 import { getDaysUntilAnniversary, isAnniversaryReady } from '../lib/date-utils';
 
-interface UseCoupleReturn {
+interface CoupleContextType {
   couple: Couple | null;
   partner: Profile | null;
   loading: boolean;
@@ -12,6 +13,9 @@ interface UseCoupleReturn {
   daysUntilAnniversary: number | null;
   isRevealReady: boolean;
   isRevealed: boolean;
+  profileAvatarUrl: string | null;
+  partnerAvatarUrl: string | null;
+  refreshProfileAvatar: (storagePath: string) => Promise<void>;
   createCouple: () => Promise<string>;
   joinCouple: (inviteCode: string) => Promise<void>;
   setAnniversaryDate: (date: string) => Promise<void>;
@@ -19,12 +23,32 @@ interface UseCoupleReturn {
   refresh: () => Promise<void>;
 }
 
-export function useCouple(): UseCoupleReturn {
-  const { user } = useAuth();
+const CoupleContext = createContext<CoupleContextType>({
+  couple: null,
+  partner: null,
+  loading: true,
+  error: null,
+  daysUntilAnniversary: null,
+  isRevealReady: false,
+  isRevealed: false,
+  profileAvatarUrl: null,
+  partnerAvatarUrl: null,
+  refreshProfileAvatar: async () => {},
+  createCouple: async () => '',
+  joinCouple: async () => {},
+  setAnniversaryDate: async () => {},
+  unpairCouple: async () => {},
+  refresh: async () => {},
+});
+
+export function CoupleProvider({ children }: { children: React.ReactNode }) {
+  const { user, profile } = useAuth();
   const [couple, setCouple] = useState<Couple | null>(null);
   const [partner, setPartner] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
+  const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
 
   const fetchCouple = useCallback(async () => {
     if (!user) {
@@ -64,6 +88,33 @@ export function useCouple(): UseCoupleReturn {
   useEffect(() => {
     fetchCouple();
   }, [fetchCouple]);
+
+  // Preload avatar signed URLs so they're ready before navigating to Settings
+  useEffect(() => {
+    if (profile?.avatar_url) {
+      getSignedUrl(profile.avatar_url)
+        .then(setProfileAvatarUrl)
+        .catch(() => {});
+    } else {
+      setProfileAvatarUrl(null);
+    }
+  }, [profile?.avatar_url]);
+
+  useEffect(() => {
+    if (partner?.avatar_url) {
+      getSignedUrl(partner.avatar_url)
+        .then(setPartnerAvatarUrl)
+        .catch(() => {});
+    } else {
+      setPartnerAvatarUrl(null);
+    }
+  }, [partner?.avatar_url]);
+
+  // Allow Settings to update the profile avatar URL after uploading a new photo
+  const refreshProfileAvatar = useCallback(async (storagePath: string) => {
+    const url = await getSignedUrl(storagePath);
+    setProfileAvatarUrl(url);
+  }, []);
 
   const createCouple = async (): Promise<string> => {
     if (!user) throw new Error('Not authenticated');
@@ -162,18 +213,35 @@ export function useCouple(): UseCoupleReturn {
   // is_revealed stays true after a reveal has been triggered for the current year
   const isRevealed = couple?.is_revealed === true;
 
-  return {
-    couple,
-    partner,
-    loading,
-    error,
-    daysUntilAnniversary,
-    isRevealReady,
-    isRevealed,
-    createCouple,
-    joinCouple,
-    setAnniversaryDate,
-    unpairCouple,
-    refresh: fetchCouple,
-  };
+  return (
+    <CoupleContext.Provider
+      value={{
+        couple,
+        partner,
+        loading,
+        error,
+        daysUntilAnniversary,
+        isRevealReady,
+        isRevealed,
+        profileAvatarUrl,
+        partnerAvatarUrl,
+        refreshProfileAvatar,
+        createCouple,
+        joinCouple,
+        setAnniversaryDate,
+        unpairCouple,
+        refresh: fetchCouple,
+      }}
+    >
+      {children}
+    </CoupleContext.Provider>
+  );
+}
+
+export function useCouple() {
+  const context = useContext(CoupleContext);
+  if (!context) {
+    throw new Error('useCouple must be used within a CoupleProvider');
+  }
+  return context;
 }
