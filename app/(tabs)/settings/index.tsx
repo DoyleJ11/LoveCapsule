@@ -20,11 +20,11 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../../../src/providers/AuthProvider';
-import { useCouple } from '../../../src/hooks/useCouple';
+import { useCouple } from '../../../src/providers/CoupleProvider';
 import { useCheckpoint } from '../../../src/hooks/useCheckpoint';
 import { signOut } from '../../../src/lib/auth';
 import { supabase } from '../../../src/lib/supabase';
-import { compressImage, uploadMedia, getSignedUrl } from '../../../src/lib/storage';
+import { compressImage, uploadMedia } from '../../../src/lib/storage';
 import {
   formatEntryDate,
   formatCheckpointFrequency,
@@ -46,8 +46,18 @@ const DAY_OPTIONS = Array.from({ length: 28 }, (_, i) => i + 1);
 
 export default function SettingsScreen() {
   const { profile, user, refreshProfile } = useAuth();
-  const { couple, partner, createCouple, joinCouple, setAnniversaryDate, unpairCouple, loading } =
-    useCouple();
+  const {
+    couple,
+    partner,
+    createCouple,
+    joinCouple,
+    setAnniversaryDate,
+    unpairCouple,
+    loading,
+    profileAvatarUrl: avatarUrl,
+    partnerAvatarUrl,
+    refreshProfileAvatar,
+  } = useCouple();
   const {
     configs: checkpointConfigs,
     loadConfigs,
@@ -65,9 +75,6 @@ export default function SettingsScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(profile?.display_name || '');
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
-
   // Checkpoint modal state
   const [showCheckpointModal, setShowCheckpointModal] = useState(false);
   const [editingCheckpoint, setEditingCheckpoint] = useState<CheckpointConfig | null>(null);
@@ -78,24 +85,6 @@ export default function SettingsScreen() {
   const [checkpointLabel, setCheckpointLabel] = useState('');
   const [checkpointActive, setCheckpointActive] = useState(true);
   const [showCheckpointDatePicker, setShowCheckpointDatePicker] = useState(false);
-
-  useEffect(() => {
-    if (profile?.avatar_url) {
-      getSignedUrl(profile.avatar_url)
-        .then(setAvatarUrl)
-        .catch(() => {});
-    }
-  }, [profile?.avatar_url]);
-
-  useEffect(() => {
-    if (partner?.avatar_url) {
-      getSignedUrl(partner.avatar_url)
-        .then(setPartnerAvatarUrl)
-        .catch(() => {});
-    } else {
-      setPartnerAvatarUrl(null);
-    }
-  }, [partner?.avatar_url]);
 
   // Load checkpoint configs when couple is available
   useEffect(() => {
@@ -249,8 +238,7 @@ export default function SettingsScreen() {
         .update({ avatar_url: storagePath, updated_at: new Date().toISOString() })
         .eq('id', user.id);
       if (error) throw error;
-      const url = await getSignedUrl(storagePath);
-      setAvatarUrl(url);
+      await refreshProfileAvatar(storagePath);
       await refreshProfile();
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to update profile picture');

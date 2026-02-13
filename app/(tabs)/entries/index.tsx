@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, useColorScheme } fr
 import { useRouter, useFocusEffect } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useAuth } from '../../../src/providers/AuthProvider';
-import { useCouple } from '../../../src/hooks/useCouple';
+import { useCouple } from '../../../src/providers/CoupleProvider';
 import { useEntries } from '../../../src/hooks/useEntries';
 import { formatRelativeDay } from '../../../src/lib/date-utils';
 import { Colors, Spacing, FontSize, BorderRadius, Moods } from '../../../src/constants/theme';

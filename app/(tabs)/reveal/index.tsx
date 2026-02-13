@@ -16,7 +16,7 @@ import PagerView from 'react-native-pager-view';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import Animated, { FadeIn, FadeInDown, FadeInUp, ZoomIn } from 'react-native-reanimated';
 import MapView, { Marker } from 'react-native-maps';
-import { useCouple } from '../../../src/hooks/useCouple';
+import { useCouple } from '../../../src/providers/CoupleProvider';
 import { useReveal } from '../../../src/hooks/useReveal';
 import { useCheckpoint } from '../../../src/hooks/useCheckpoint';
 import { useAuth } from '../../../src/providers/AuthProvider';
