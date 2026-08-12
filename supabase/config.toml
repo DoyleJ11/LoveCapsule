@@ -353,7 +353,9 @@ allow_dynamic_registration = false
 # Edge Functions — skip gateway JWT verification for functions that use
 # the service-role key internally to perform privileged operations.
 [functions.check-anniversary]
-verify_jwt = false
+# Callers must present a valid user JWT; the function then checks that the
+# caller belongs to the couple named in the request body.
+verify_jwt = true
 
 [functions.notify-partner]
 verify_jwt = false
