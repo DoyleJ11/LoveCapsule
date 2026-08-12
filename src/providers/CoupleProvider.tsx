@@ -203,8 +203,10 @@ export function CoupleProvider({ children }: { children: React.ReactNode }) {
     ? isAnniversaryReady(couple.anniversary_date, couple.last_reveal_year)
     : false;
 
-  // is_revealed stays true after a reveal has been triggered for the current year
-  const isRevealed = couple?.is_revealed === true;
+  // True only when THIS year's capsule has been opened. Derived from
+  // last_reveal_year rather than the legacy is_revealed flag, which is
+  // sticky forever once set (see migration 009).
+  const isRevealed = couple?.last_reveal_year === new Date().getFullYear();
 
   return (
     <CoupleContext.Provider

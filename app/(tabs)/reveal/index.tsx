@@ -601,9 +601,10 @@ export default function RevealScreen() {
     );
   }
 
-  // Show locked screen when it's NOT the anniversary day
-  // But first check if it's a checkpoint day
-  if (!couple || !isRevealReady) {
+  // Show locked screen when it's NOT the anniversary day and this year's
+  // capsule has not been opened yet. isRevealed keeps the reveal
+  // reachable for the rest of the year after opening it.
+  if (!couple || (!isRevealReady && !isRevealed)) {
     // Checkpoint day - show checkpoint UI instead of locked
     if (isCheckpointDay && todaysCheckpoints.length > 0) {
       return (
@@ -705,10 +706,20 @@ export default function RevealScreen() {
               onPress={async () => {
                 if (!couple) return;
                 const currentYear = new Date().getFullYear();
-                // If already revealed, just load stats (no edge function needed)
-                const success = isRevealed
-                  ? await loadStats(couple.id, currentYear)
-                  : await triggerReveal(couple.id);
+                // If this year's capsule is already open, just load its
+                // stats. Otherwise trigger the reveal, then refresh the
+                // couple so last_reveal_year (which now drives partner
+                // visibility) is current for the rest of the session.
+                let success: boolean;
+                if (isRevealed) {
+                  success = await loadStats(couple.id, currentYear);
+                } else {
+                  success = await triggerReveal(couple.id);
+                  if (success) {
+                    await refreshCouple();
+                    await loadRevealYears(couple.id);
+                  }
+                }
                 if (success) setStarted(true);
               }}
               disabled={loading}
