@@ -134,22 +134,15 @@ export function CoupleProvider({ children }: { children: React.ReactNode }) {
   const joinCouple = async (inviteCode: string) => {
     if (!user) throw new Error('Not authenticated');
 
-    // If the user previously created an empty couple (no partner joined),
-    // delete it before joining the other couple.
-    if (couple && !couple.partner_2_id && couple.partner_1_id === user.id) {
-      await supabase.from('couples').delete().eq('id', couple.id);
-    }
-
-    const { data, error: joinError } = await supabase
-      .from('couples')
-      .update({ partner_2_id: user.id })
-      .eq('invite_code', inviteCode.trim().toLowerCase())
-      .is('partner_2_id', null)
-      .select()
-      .single();
+    // Joining runs server-side: invite codes are no longer readable by
+    // clients, so the RPC finds the couple by code, abandons any empty
+    // couple the user created, and sets partner_2_id to the caller.
+    const { data, error: joinError } = await supabase.rpc('join_couple_by_code', {
+      p_invite_code: inviteCode.trim(),
+    });
 
     if (joinError || !data) {
-      throw new Error('Invalid invite code or couple already full');
+      throw new Error(joinError?.message || 'Invalid invite code or couple already full');
     }
 
     await fetchCouple();
