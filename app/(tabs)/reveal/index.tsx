@@ -139,7 +139,7 @@ function BarComparison({
 
 export default function RevealScreen() {
   const { couple, partner, isRevealReady, isRevealed, refresh: refreshCouple } = useCouple();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const {
     stats,
     partnerEntries,
@@ -255,10 +255,15 @@ export default function RevealScreen() {
           text: 'Force Reveal',
           onPress: async () => {
             const currentYear = new Date().getFullYear();
-            await supabase
-              .from('couples')
-              .update({ is_revealed: true, last_reveal_year: currentYear })
-              .eq('id', couple.id);
+            const { error: devError } = await supabase.rpc('dev_set_reveal_state', {
+              p_couple_id: couple.id,
+              p_last_reveal_year: currentYear,
+              p_is_revealed: true,
+            });
+            if (devError) {
+              Alert.alert('Dev', devError.message);
+              return;
+            }
             await refreshCouple();
             const success = await loadStats(couple.id);
             if (success) setStarted(true);
@@ -279,10 +284,15 @@ export default function RevealScreen() {
           text: 'Reset',
           style: 'destructive',
           onPress: async () => {
-            await supabase
-              .from('couples')
-              .update({ is_revealed: false, last_reveal_year: null })
-              .eq('id', couple.id);
+            const { error: devError } = await supabase.rpc('dev_set_reveal_state', {
+              p_couple_id: couple.id,
+              p_last_reveal_year: null,
+              p_is_revealed: false,
+            });
+            if (devError) {
+              Alert.alert('Dev', devError.message);
+              return;
+            }
             reset();
             setStarted(false);
             setShowEntries(false);
@@ -303,7 +313,9 @@ export default function RevealScreen() {
   };
 
   const renderDevTools = () => {
-    if (!DEV_TOOLS_ENABLED || !couple) return null;
+    // Server-enforced too: dev_set_reveal_state requires profiles.is_admin,
+    // so hiding the buttons here is presentation, not the security boundary.
+    if (!DEV_TOOLS_ENABLED || !couple || !profile?.is_admin) return null;
     return (
       <View
         style={[

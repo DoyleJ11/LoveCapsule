@@ -3,6 +3,8 @@ export interface Profile {
   display_name: string;
   avatar_url: string | null;
   expo_push_token: string | null;
+  /** Unlocks the in-app dev tools. Only settable from the Supabase dashboard. */
+  is_admin: boolean;
   created_at: string;
   updated_at: string;
 }
