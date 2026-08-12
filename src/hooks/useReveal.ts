@@ -22,6 +22,23 @@ interface UseRevealReturn {
   reset: () => void;
 }
 
+/**
+ * supabase-js wraps any non-2xx edge function response in a
+ * FunctionsHttpError whose message is just "Edge Function returned a
+ * non-2xx status code" — the useful text is on the attached Response.
+ */
+async function extractFunctionErrorMessage(error: unknown): Promise<string> {
+  const { context, message } =
+    (error as { context?: { json?: () => Promise<unknown> }; message?: string }) ?? {};
+  try {
+    const body = (await context?.json?.()) as { error?: string } | undefined;
+    if (body?.error) return body.error;
+  } catch {
+    // Body already consumed or not JSON — fall through to the generic message.
+  }
+  return message || 'Something went wrong opening your capsule';
+}
+
 export function useReveal(): UseRevealReturn {
   const [stats, setStats] = useState<RevealStats | null>(null);
   const [partnerEntries, setPartnerEntries] = useState<Entry[]>([]);
@@ -46,7 +63,9 @@ export function useReveal(): UseRevealReturn {
         { body: { couple_id: coupleId } }
       );
 
-      if (revealError) throw revealError;
+      // On a non-2xx response supabase-js returns data: null and a generic
+      // FunctionsHttpError, so read the real message off the response body.
+      if (revealError) throw new Error(await extractFunctionErrorMessage(revealError));
 
       // The edge function returns JSON with error field on business-logic failures
       if (revealData?.error) throw new Error(revealData.error);
