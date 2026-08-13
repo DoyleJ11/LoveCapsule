@@ -25,6 +25,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useCouple } from '../../../src/providers/CoupleProvider';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { useEntries, type CreateEntryInput } from '../../../src/hooks/useEntries';
+import { toContentHtml, countWords } from '../../../src/lib/entry-content';
 import { getSignedUrl, deleteMedia } from '../../../src/lib/storage';
 import type { Media } from '../../../src/types/database';
 import { useVoiceMemo } from '../../../src/hooks/useVoiceMemo';
@@ -78,6 +79,9 @@ export default function NewEntryScreen() {
   >(null);
   const [deleteExistingVoiceMemo, setDeleteExistingVoiceMemo] = useState(false);
   const [loadingEntry, setLoadingEntry] = useState(isEditMode);
+  // Guards the save path: an edit-mode save before the entry has loaded
+  // would overwrite the real entry with an empty form.
+  const [entryLoaded, setEntryLoaded] = useState(!isEditMode);
 
   // When recording stops and a URI is available, set as pending voice memo
   useEffect(() => {
@@ -102,8 +106,18 @@ export default function NewEntryScreen() {
           .eq('id', entryId)
           .single();
 
-        if (entryError || !entryData || cancelled) return;
+        if (cancelled) return;
 
+        // Never fall through to an empty form: saving it would overwrite
+        // the real entry with blanks.
+        if (entryError || !entryData) {
+          Alert.alert('Error', 'Could not load this entry. Please try again.', [
+            { text: 'OK', onPress: () => router.back() },
+          ]);
+          return;
+        }
+
+        setEntryLoaded(true);
         setTitle(entryData.title || '');
         setContent(entryData.content_plain || '');
         setMood(entryData.mood as MoodKey | null);
@@ -288,6 +302,13 @@ export default function NewEntryScreen() {
       return;
     }
 
+    // Defence in depth for DEV-9: the load-failure alert is async, so the
+    // user could still reach Save before it is dismissed.
+    if (isEditMode && !entryLoaded) {
+      Alert.alert('Error', 'This entry has not finished loading.');
+      return;
+    }
+
     if (!isDraft && !title.trim() && !content.trim()) {
       Alert.alert('Error', 'Please add a title or some content');
       return;
@@ -300,9 +321,9 @@ export default function NewEntryScreen() {
         // Preserve the entry's current draft status (don't auto-publish)
         await updateEntry(entryId, {
           title: title.trim(),
-          content_html: `<p>${content.replace(/\n/g, '</p><p>')}</p>`,
+          content_html: toContentHtml(content),
           content_plain: content,
-          word_count: content.trim() ? content.trim().split(/\s+/).length : 0,
+          word_count: countWords(content),
           mood,
           entry_date: entryDate,
           location_name: locationName,
@@ -391,9 +412,9 @@ export default function NewEntryScreen() {
         const entryData: CreateEntryInput = {
           couple_id: couple.id,
           title: title.trim(),
-          content_html: `<p>${content.replace(/\n/g, '</p><p>')}</p>`,
+          content_html: toContentHtml(content),
           content_plain: content,
-          word_count: content.trim() ? content.trim().split(/\s+/).length : 0,
+          word_count: countWords(content),
           mood,
           is_draft: isDraft,
           entry_date: entryDate,
@@ -896,7 +917,7 @@ export default function NewEntryScreen() {
             <TouchableOpacity
               style={[styles.draftButton, { borderColor: colors.border }]}
               onPress={() => handleSave(true)}
-              disabled={saving}
+              disabled={saving || (isEditMode && !entryLoaded)}
             >
               <Text style={[styles.draftButtonText, { color: colors.textSecondary }]}>
                 Save Draft
@@ -906,7 +927,7 @@ export default function NewEntryScreen() {
           <TouchableOpacity
             style={[styles.publishButton, { backgroundColor: colors.primary }]}
             onPress={() => handleSave(false)}
-            disabled={saving}
+            disabled={saving || (isEditMode && !entryLoaded)}
           >
             <Text style={styles.publishButtonText}>
               {saving ? 'Saving...' : isEditMode ? 'Save Changes' : 'Publish'}
