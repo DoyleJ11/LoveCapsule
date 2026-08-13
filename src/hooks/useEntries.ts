@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../providers/AuthProvider';
 import { entryEvents } from '../lib/entryEvents';
+import { fromContentHtml, countWords } from '../lib/entry-content';
 import type { Entry } from '../types/database';
 
 interface UseEntriesReturn {
@@ -28,21 +29,13 @@ export interface CreateEntryInput {
   location_lng: number | null;
 }
 
-function stripHtml(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function countWords(text: string): number {
-  const stripped = text.trim();
-  if (!stripped) return 0;
-  return stripped.split(/\s+/).length;
-}
-
+/**
+ * Fallback for callers that supply only content_html. The composer sends
+ * content_plain directly, and that value wins — deriving it from the HTML
+ * is what destroyed paragraph breaks and angle brackets (see migration 011).
+ */
 export function extractPlainTextAndWordCount(html: string) {
-  const plain = stripHtml(html);
+  const plain = fromContentHtml(html);
   return { content_plain: plain, word_count: countWords(plain) };
 }
 
@@ -98,15 +91,16 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
   const createEntry = async (data: CreateEntryInput): Promise<Entry> => {
     if (!user) throw new Error('Not authenticated');
 
-    const { content_plain, word_count } = extractPlainTextAndWordCount(data.content_html);
+    // The caller's plain text is authoritative; only derive it if absent.
+    const derived = extractPlainTextAndWordCount(data.content_html);
 
     const { data: entry, error: createError } = await supabase
       .from('entries')
       .insert({
         ...data,
         author_id: user.id,
-        content_plain,
-        word_count,
+        content_plain: data.content_plain ?? derived.content_plain,
+        word_count: data.word_count ?? derived.word_count,
       })
       .select()
       .single();
@@ -119,12 +113,17 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
   };
 
   const updateEntry = async (id: string, data: Partial<CreateEntryInput>) => {
-    const updateData: any = { ...data, updated_at: new Date().toISOString() };
+    const updateData: Partial<CreateEntryInput> & { updated_at: string } = {
+      ...data,
+      updated_at: new Date().toISOString(),
+    };
 
-    if (data.content_html) {
-      const { content_plain, word_count } = extractPlainTextAndWordCount(data.content_html);
-      updateData.content_plain = content_plain;
-      updateData.word_count = word_count;
+    // Derive plain text only when the caller changed the HTML but did not
+    // supply the matching plain text itself.
+    if (data.content_html !== undefined && data.content_plain === undefined) {
+      const derived = extractPlainTextAndWordCount(data.content_html);
+      updateData.content_plain = derived.content_plain;
+      updateData.word_count = derived.word_count;
     }
 
     const { error: updateError } = await supabase.from('entries').update(updateData).eq('id', id);
