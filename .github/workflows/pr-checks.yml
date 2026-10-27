@@ -2,7 +2,7 @@ name: PR Checks
 
 on:
   pull_request:
-    branches: [main, master]
+    branches: [dev, main, master]
 
 jobs:
   validate:
@@ -37,3 +37,26 @@ jobs:
         with:
           file: ./coverage/lcov.info
           fail_ci_if_error: false
+
+  database:
+    name: Database reveal & save regressions
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: audit-test
+          POSTGRES_DB: lovecapsule_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      LOVE_CAPSULE_TEST_DB: postgresql://postgres:audit-test@localhost:5432/lovecapsule_test_ci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run actual Postgres/RLS regressions
+        run: python3 scripts/test_database.py

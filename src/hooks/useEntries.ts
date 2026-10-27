@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../providers/AuthProvider';
 import { entryEvents } from '../lib/entryEvents';
 import type { Entry } from '../types/database';
+import { entryContent } from '../features/entries/content';
 
 interface UseEntriesReturn {
   entries: Entry[];
@@ -28,24 +29,6 @@ export interface CreateEntryInput {
   location_lng: number | null;
 }
 
-function stripHtml(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function countWords(text: string): number {
-  const stripped = text.trim();
-  if (!stripped) return 0;
-  return stripped.split(/\s+/).length;
-}
-
-export function extractPlainTextAndWordCount(html: string) {
-  const plain = stripHtml(html);
-  return { content_plain: plain, word_count: countWords(plain) };
-}
-
 export function useEntries(coupleId: string | undefined): UseEntriesReturn {
   const { user } = useAuth();
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -54,10 +37,14 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
 
   const fetchEntries = useCallback(async () => {
     if (!user || !coupleId) {
+      setEntries([]);
+      setError(null);
       setLoading(false);
       return;
     }
 
+    setLoading(true);
+    setError(null);
     try {
       const { data, error: fetchError } = await supabase
         .from('entries')
@@ -98,7 +85,7 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
   const createEntry = async (data: CreateEntryInput): Promise<Entry> => {
     if (!user) throw new Error('Not authenticated');
 
-    const { content_plain, word_count } = extractPlainTextAndWordCount(data.content_html);
+    const { content_plain, content_html, word_count } = entryContent(data.content_plain);
 
     const { data: entry, error: createError } = await supabase
       .from('entries')
@@ -106,6 +93,7 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
         ...data,
         author_id: user.id,
         content_plain,
+        content_html,
         word_count,
       })
       .select()
@@ -121,11 +109,8 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
   const updateEntry = async (id: string, data: Partial<CreateEntryInput>) => {
     const updateData: any = { ...data, updated_at: new Date().toISOString() };
 
-    if (data.content_html) {
-      const { content_plain, word_count } = extractPlainTextAndWordCount(data.content_html);
-      updateData.content_plain = content_plain;
-      updateData.word_count = word_count;
-    }
+    if (data.content_plain !== undefined)
+      Object.assign(updateData, entryContent(data.content_plain));
 
     const { error: updateError } = await supabase.from('entries').update(updateData).eq('id', id);
 

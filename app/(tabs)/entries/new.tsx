@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,21 +16,31 @@ import {
   Modal,
   ActivityIndicator,
   FlatList,
+  AppState,
 } from 'react-native';
 import { useRouter, useNavigation, useLocalSearchParams } from 'expo-router';
+import { usePreventRemove } from '@react-navigation/native';
+import { uuid } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { format } from 'date-fns';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
 import { useCouple } from '../../../src/providers/CoupleProvider';
 import { useAuth } from '../../../src/providers/AuthProvider';
-import { useEntries, type CreateEntryInput } from '../../../src/hooks/useEntries';
-import { getSignedUrl, deleteMedia } from '../../../src/lib/storage';
+import type { CreateEntryInput } from '../../../src/hooks/useEntries';
+import { loadEditableEntry, saveEntry } from '../../../src/features/entries/api';
+import { entryContent } from '../../../src/features/entries/content';
+import { createDraftStore, draftKey, type EntryDraft } from '../../../src/features/entries/drafts';
+import { keepDraftFile, removeDraftFiles } from '../../../src/features/entries/files';
+import type { PendingAttachment, SavePlan } from '../../../src/features/entries/save-workflow';
+import { entryEvents } from '../../../src/lib/entryEvents';
+import { errorMessage } from '../../../src/lib/errors';
+import { getSignedUrl } from '../../../src/lib/storage';
 import type { Media } from '../../../src/types/database';
 import { useVoiceMemo } from '../../../src/hooks/useVoiceMemo';
 import { getCurrentDateString, formatEntryDate, formatDuration } from '../../../src/lib/date-utils';
-import { compressImage, uploadMedia } from '../../../src/lib/storage';
-import { supabase } from '../../../src/lib/supabase';
+import { compressImage } from '../../../src/lib/storage';
 import { searchLocations, type LocationResult } from '../../../src/lib/location-search';
 import {
   Colors,
@@ -41,19 +51,26 @@ import {
   type MoodKey,
 } from '../../../src/constants/theme';
 
-const DRAFT_KEY = 'new_entry_draft';
+type DraftImage = ImagePicker.ImagePickerAsset & { draftId: string };
 
 export default function NewEntryScreen() {
+  const { user } = useAuth();
+  const { couple } = useCouple();
+  const { entryId } = useLocalSearchParams<{ entryId?: string }>();
+  return <EntryEditor key={`${user?.id}:${couple?.id}:${entryId ?? 'new'}`} />;
+}
+
+function EntryEditor() {
   const { entryId } = useLocalSearchParams<{ entryId?: string }>();
   const isEditMode = !!entryId;
   const { couple } = useCouple();
   const { user } = useAuth();
-  const { createEntry, updateEntry } = useEntries(couple?.id);
+  const userId = user?.id;
+  const coupleId = couple?.id;
   const router = useRouter();
   const navigation = useNavigation();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [mood, setMood] = useState<MoodKey | null>(null);
@@ -62,407 +79,439 @@ export default function NewEntryScreen() {
   const [locationName, setLocationName] = useState<string | null>(null);
   const [locationLat, setLocationLat] = useState<number | null>(null);
   const [locationLng, setLocationLng] = useState<number | null>(null);
-  const [pendingImages, setPendingImages] = useState<ImagePicker.ImagePickerAsset[]>([]);
-  const [saving, setSaving] = useState(false);
+  const [pendingImages, setPendingImages] = useState<DraftImage[]>([]);
   const [pendingVoiceMemo, setPendingVoiceMemo] = useState<{
+    id: string;
     uri: string;
     durationMs: number;
   } | null>(null);
-  const voiceMemo = useVoiceMemo();
-
-  // Edit mode state
   const [existingImages, setExistingImages] = useState<(Media & { signedUrl?: string })[]>([]);
   const [imagesToDelete, setImagesToDelete] = useState<Media[]>([]);
   const [existingVoiceMemo, setExistingVoiceMemo] = useState<
     (Media & { signedUrl?: string }) | null
   >(null);
   const [deleteExistingVoiceMemo, setDeleteExistingVoiceMemo] = useState(false);
-  const [loadingEntry, setLoadingEntry] = useState(isEditMode);
-
-  // When recording stops and a URI is available, set as pending voice memo
-  useEffect(() => {
-    if (voiceMemo.recordingUri && voiceMemo.durationMs > 0 && !pendingVoiceMemo) {
-      setPendingVoiceMemo({
-        uri: voiceMemo.recordingUri,
-        durationMs: voiceMemo.durationMs,
-      });
-    }
-  }, [voiceMemo.recordingUri, voiceMemo.durationMs]);
-
-  // Load existing entry data in edit mode
-  useEffect(() => {
-    if (!entryId) return;
-    let cancelled = false;
-
-    const loadEntry = async () => {
-      try {
-        const { data: entryData, error: entryError } = await supabase
-          .from('entries')
-          .select('*')
-          .eq('id', entryId)
-          .single();
-
-        if (entryError || !entryData || cancelled) return;
-
-        setTitle(entryData.title || '');
-        setContent(entryData.content_plain || '');
-        setMood(entryData.mood as MoodKey | null);
-        setEntryDate(entryData.entry_date);
-        setLocationName(entryData.location_name);
-        setLocationLat(entryData.location_lat);
-        setLocationLng(entryData.location_lng);
-
-        // Load media
-        const { data: mediaData } = await supabase
-          .from('media')
-          .select('*')
-          .eq('entry_id', entryId)
-          .order('created_at', { ascending: true });
-
-        if (cancelled) return;
-
-        if (mediaData && mediaData.length > 0) {
-          const images: (Media & { signedUrl?: string })[] = [];
-          let audio: (Media & { signedUrl?: string }) | null = null;
-
-          for (const m of mediaData) {
-            try {
-              const signedUrl = await getSignedUrl(m.storage_path);
-              if (m.media_type === 'image') {
-                images.push({ ...m, signedUrl });
-              } else if (m.media_type === 'audio') {
-                audio = { ...m, signedUrl };
-              }
-            } catch {
-              if (m.media_type === 'image') images.push(m);
-              else if (m.media_type === 'audio') audio = m;
-            }
-          }
-
-          setExistingImages(images);
-          setExistingVoiceMemo(audio);
-        }
-      } finally {
-        if (!cancelled) setLoadingEntry(false);
-      }
-    };
-
-    loadEntry();
-    return () => {
-      cancelled = true;
-    };
-  }, [entryId]);
-
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const stagingRef = useRef(false);
+  const [staging, setStaging] = useState(false);
+  const savedSuccessfully = useRef(false);
+  const [loadingEntry, setLoadingEntry] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  const [draftEntryId, setDraftEntryId] = useState(() => entryId ?? uuid.v4());
+  const expectedVersion = useRef<string | null>(null);
+  const originalDraftStatus = useRef(true);
+  const baseline = useRef('');
+  const [pendingSave, setPendingSave] = useState<SavePlan | null>(null);
+  const pendingSaveRef = useRef<SavePlan | null>(null);
+  const snapshotRef = useRef<EntryDraft | null>(null);
+  const recordingSaved = useRef<(uri: string, ms: number) => Promise<string | void>>(
+    async () => {}
+  );
+  const voiceMemo = useVoiceMemo((uri, ms) => recordingSaved.current(uri, ms));
+  const key = user && couple ? draftKey(user.id, couple.id, entryId) : null;
+  const store = useMemo(() => (key ? createDraftStore(AsyncStorage, key) : null), [key]);
+  const [allowExit, setAllowExit] = useState(false);
+  const exitAction = useRef<(() => void) | null>(null);
   const [locationSearchVisible, setLocationSearchVisible] = useState(false);
   const [locationQuery, setLocationQuery] = useState('');
   const [locationSearching, setLocationSearching] = useState(false);
   const [locationResults, setLocationResults] = useState<LocationResult[]>([]);
-  const savedSuccessfully = useRef(false);
-
-  // Safe navigation back from the new entry screen.
-  // Check if there are other screens in the entries stack to pop back to.
-  // navigation.canGoBack() can be misleading because it checks the parent
-  // navigator too. Instead, check the entries stack's route count directly.
-  const navigateAway = useCallback(() => {
-    const state = navigation.getState();
-    const hasScreenBelow = state && state.routes && state.routes.length > 1;
-    if (hasScreenBelow) {
-      router.dismiss();
-    } else {
-      router.navigate('/(tabs)/entries');
-    }
-  }, [router, navigation]);
   const scrollViewRef = useRef<ScrollView>(null);
   const locationSearchRef = useRef<TextInput>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Restore draft on mount (create mode only)
-  useEffect(() => {
-    if (isEditMode) return;
-    AsyncStorage.getItem(DRAFT_KEY).then((raw) => {
-      if (!raw) return;
-      try {
-        const draft = JSON.parse(raw);
-        if (draft.title) setTitle(draft.title);
-        if (draft.content) setContent(draft.content);
-        if (draft.mood) setMood(draft.mood);
-        if (draft.entryDate) setEntryDate(draft.entryDate);
-        if (draft.locationName) setLocationName(draft.locationName);
-        if (draft.locationLat) setLocationLat(draft.locationLat);
-        if (draft.locationLng) setLocationLng(draft.locationLng);
-      } catch {}
-    });
-  }, []);
+  const navigateAway = useCallback(() => {
+    const state = navigation.getState();
+    if ((state?.routes.length ?? 0) > 1) router.dismiss();
+    else router.navigate('/(tabs)/entries');
+  }, [navigation, router]);
 
-  // Auto-save draft on changes (debounced, create mode only)
   useEffect(() => {
-    if (isEditMode) return;
-    if (savedSuccessfully.current) return;
-    const timeout = setTimeout(() => {
-      if (title.trim() || content.trim()) {
-        AsyncStorage.setItem(
-          DRAFT_KEY,
-          JSON.stringify({
-            title,
-            content,
-            mood,
-            entryDate,
-            locationName,
-            locationLat,
-            locationLng,
+    if (!userId || !coupleId || !store) return;
+    let cancelled = false;
+    setLoadingEntry(true);
+    setLoadError(null);
+    snapshotRef.current = null;
+    savedSuccessfully.current = false;
+    const load = async () => {
+      try {
+        const loaded = entryId ? await loadEditableEntry(entryId, userId, coupleId) : null;
+        const draft = await store.load(userId, coupleId);
+        if (cancelled) return;
+        const blank: CreateEntryInput = {
+          couple_id: coupleId,
+          title: '',
+          ...entryContent(''),
+          mood: null,
+          is_draft: true,
+          entry_date: getCurrentDateString(),
+          location_name: null,
+          location_lat: null,
+          location_lng: null,
+        };
+        const initial = loaded?.entry ?? blank;
+        baseline.current = JSON.stringify({
+          title: initial.title,
+          content: initial.content_plain,
+          mood: initial.mood,
+          entryDate: initial.entry_date,
+          locationName: initial.location_name,
+          locationLat: initial.location_lat,
+          locationLng: initial.location_lng,
+        });
+        const fields = draft?.pendingSave?.fields ?? draft?.fields ?? initial;
+        setTitle(fields.title);
+        setContent(fields.content_plain);
+        setMood(fields.mood as MoodKey | null);
+        setEntryDate(fields.entry_date);
+        setLocationName(fields.location_name);
+        setLocationLat(fields.location_lat);
+        setLocationLng(fields.location_lng);
+        setDraftEntryId(draft?.entryId ?? entryId ?? uuid.v4());
+        expectedVersion.current = draft
+          ? draft.expectedUpdatedAt
+          : (loaded?.entry.updated_at ?? null);
+        originalDraftStatus.current = loaded?.entry.is_draft ?? true;
+        pendingSaveRef.current = draft?.pendingSave ?? null;
+        setPendingSave(pendingSaveRef.current);
+        const attachments = draft?.attachments ?? [];
+        setPendingImages(
+          attachments
+            .filter((a) => a.media_type === 'image')
+            .map((a) => ({
+              uri: a.uri,
+              width: a.width ?? 0,
+              height: a.height ?? 0,
+              draftId: a.id,
+            }))
+        );
+        const audio = attachments.find((a) => a.media_type === 'audio');
+        setPendingVoiceMemo(
+          audio ? { id: audio.id, uri: audio.uri, durationMs: audio.duration_ms ?? 0 } : null
+        );
+        const removed = draft?.removeMediaIds ?? [];
+        const media = await Promise.all(
+          (loaded?.media ?? []).map(async (m: Media) => {
+            try {
+              return { ...m, signedUrl: await getSignedUrl(m.storage_path) };
+            } catch {
+              return m;
+            }
           })
         );
+        if (cancelled) return;
+        setExistingImages(media.filter((m) => m.media_type === 'image' && !removed.includes(m.id)));
+        setImagesToDelete(media.filter((m) => m.media_type === 'image' && removed.includes(m.id)));
+        const existingAudio = media.find((m) => m.media_type === 'audio') ?? null;
+        setExistingVoiceMemo(existingAudio);
+        setDeleteExistingVoiceMemo(!!existingAudio && removed.includes(existingAudio.id));
+      } catch (error) {
+        if (!cancelled) setLoadError(errorMessage(error));
+      } finally {
+        if (!cancelled) setLoadingEntry(false);
       }
-    }, 500);
-    return () => clearTimeout(timeout);
-  }, [title, content, mood, entryDate, locationName, locationLat, locationLng]);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, coupleId, store, entryId, reload]);
 
-  const hasMemo = !!pendingVoiceMemo || (!!existingVoiceMemo && !deleteExistingVoiceMemo);
-
-  const hasContent =
-    isEditMode ||
-    !!(title.trim() || content.trim() || pendingImages.length > 0 || pendingVoiceMemo);
-
-  // Disable swipe-to-dismiss gesture when there's content to prevent accidental loss
-  useEffect(() => {
-    navigation.setOptions({
-      gestureEnabled: !hasContent,
+  const attachments: PendingAttachment[] = pendingImages.map((a) => ({
+    id: a.draftId,
+    uri: a.uri,
+    media_type: 'image',
+    mime_type: 'image/jpeg',
+    width: a.width,
+    height: a.height,
+  }));
+  if (pendingVoiceMemo)
+    attachments.push({
+      id: pendingVoiceMemo.id,
+      uri: pendingVoiceMemo.uri,
+      media_type: 'audio',
+      mime_type: 'audio/mp4',
+      duration_ms: pendingVoiceMemo.durationMs,
     });
-  }, [navigation, hasContent]);
+  const fields: CreateEntryInput = {
+    couple_id: couple?.id ?? '',
+    title: title.trim(),
+    ...entryContent(content),
+    mood,
+    is_draft: originalDraftStatus.current,
+    entry_date: entryDate,
+    location_name: locationName,
+    location_lat: locationLat,
+    location_lng: locationLng,
+  };
+  const snapshot: EntryDraft = {
+    version: 1,
+    userId: user?.id ?? '',
+    coupleId: couple?.id ?? '',
+    entryId: draftEntryId,
+    expectedUpdatedAt: expectedVersion.current,
+    fields: pendingSave?.fields ?? fields,
+    attachments,
+    removeMediaIds: [
+      ...imagesToDelete.map((m) => m.id),
+      ...(deleteExistingVoiceMemo && existingVoiceMemo ? [existingVoiceMemo.id] : []),
+    ],
+    pendingSave,
+  };
+  if (!loadingEntry && !loadError && user && couple) snapshotRef.current = snapshot;
+  const serialized = JSON.stringify(snapshot);
+  const hasMemo = !!pendingVoiceMemo || (!!existingVoiceMemo && !deleteExistingVoiceMemo);
+  const hasContent = !!(
+    title.trim() ||
+    content.trim() ||
+    attachments.length ||
+    voiceMemo.isRecording
+  );
+  const dirty =
+    baseline.current !==
+      JSON.stringify({ title, content, mood, entryDate, locationName, locationLat, locationLng }) ||
+    attachments.length > 0 ||
+    imagesToDelete.length > 0 ||
+    deleteExistingVoiceMemo;
 
-  const handleClose = () => {
-    if (isEditMode) {
-      if (savedSuccessfully.current) {
-        router.back();
-        return;
-      }
-      Alert.alert('Discard Changes?', 'You have unsaved changes that will be lost.', [
-        { text: 'Keep Editing', style: 'cancel' },
-        {
-          text: 'Discard',
-          style: 'destructive',
-          onPress: () => router.back(),
-        },
-      ]);
-      return;
-    }
+  const flushDraft = useCallback(async () => {
+    if (!store || !snapshotRef.current) return;
+    await store.save({ ...snapshotRef.current, pendingSave: pendingSaveRef.current });
+    setDraftError(null);
+  }, [store]);
 
-    if (!hasContent || savedSuccessfully.current) {
-      AsyncStorage.removeItem(DRAFT_KEY);
-      navigateAway();
-      return;
-    }
-    Alert.alert(
-      'Discard Entry?',
-      'You have unsaved changes. Your draft has been saved and will be restored next time.',
-      [
-        { text: 'Keep Editing', style: 'cancel' },
-        {
-          text: 'Discard',
-          style: 'destructive',
-          onPress: () => {
-            AsyncStorage.removeItem(DRAFT_KEY);
-            navigateAway();
-          },
-        },
-      ]
+  useEffect(() => {
+    if (loadingEntry || loadError || savedSuccessfully.current || !store) return;
+    // Serial writes prevent an older autosave from undoing Save/Discard.
+    void store
+      .save(JSON.parse(serialized) as EntryDraft)
+      .then(() => setDraftError(null))
+      .catch((error) => setDraftError(errorMessage(error)));
+  }, [serialized, loadingEntry, loadError, store]);
+
+  recordingSaved.current = async (uri, ms) => {
+    const current = snapshotRef.current;
+    if (!current || !store)
+      throw new Error('Your diary is not ready. Keep this recording and retry.');
+    const id = uuid.v4();
+    const durableUri = keepDraftFile(
+      uri,
+      current.userId,
+      current.coupleId,
+      current.entryId,
+      `${id}.m4a`
     );
+    const audio: PendingAttachment = {
+      id,
+      uri: durableUri,
+      media_type: 'audio',
+      mime_type: 'audio/mp4',
+      duration_ms: ms,
+    };
+    snapshotRef.current = {
+      ...current,
+      attachments: [...current.attachments.filter((a) => a.media_type !== 'audio'), audio],
+    };
+    setPendingVoiceMemo({ id, uri: durableUri, durationMs: ms });
+    await store.save(snapshotRef.current);
+    return durableUri;
   };
 
-  // Set up header with close button and title
+  const latest = useRef({
+    stopRecording: voiceMemo.stopRecording,
+    isRecording: voiceMemo.isRecording || voiceMemo.isFinalizing,
+    flushDraft,
+  });
+  latest.current = {
+    stopRecording: voiceMemo.stopRecording,
+    isRecording: voiceMemo.isRecording || voiceMemo.isFinalizing,
+    flushDraft,
+  };
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') return;
+      const work = latest.current;
+      void (async () => {
+        if (work.isRecording && !(await work.stopRecording()))
+          throw new Error('The recording could not be kept yet.');
+        await work.flushDraft();
+      })().catch((error) => setDraftError(errorMessage(error)));
+    });
+    return () => subscription.remove();
+  }, []);
+
+  const leave = useCallback((action: () => void) => {
+    exitAction.current = action;
+    setAllowExit(true);
+  }, []);
+  useEffect(() => {
+    if (allowExit && exitAction.current) {
+      const action = exitAction.current;
+      exitAction.current = null;
+      action();
+    }
+  }, [allowExit]);
+
+  const requestLeave = useCallback(
+    (action: () => void) => {
+      if (savingRef.current || stagingRef.current || voiceMemo.isFinalizing) {
+        Alert.alert('Keeping your memory', 'Please wait for the attachment or save to finish.');
+        return;
+      }
+      if (
+        savedSuccessfully.current ||
+        loadingEntry ||
+        loadError ||
+        (!dirty && !voiceMemo.isRecording && !pendingSaveRef.current)
+      ) {
+        leave(action);
+        return;
+      }
+      const keep = async () => {
+        try {
+          if (latest.current.isRecording && !(await latest.current.stopRecording()))
+            throw new Error('The recording could not be kept yet.');
+          await latest.current.flushDraft();
+          leave(action);
+        } catch (error) {
+          Alert.alert('Draft could not be saved', errorMessage(error));
+        }
+      };
+      Alert.alert(
+        'Keep your draft?',
+        pendingSaveRef.current
+          ? 'This save needs a retry. Keep the draft to resume it safely next time.'
+          : 'Text, photos and voice memos can be kept on this device for next time.',
+        [
+          { text: 'Keep Editing', style: 'cancel' },
+          {
+            text: 'Keep Draft',
+            onPress: () => {
+              void keep();
+            },
+          },
+          ...(!pendingSaveRef.current
+            ? [
+                {
+                  text: 'Discard',
+                  style: 'destructive' as const,
+                  onPress: () => {
+                    void (async () => {
+                      if (latest.current.isRecording && !(await latest.current.stopRecording()))
+                        throw new Error('The recording could not be kept yet.');
+                      await store?.clear();
+                      if (snapshotRef.current) removeDraftFiles(snapshotRef.current);
+                      savedSuccessfully.current = true;
+                      leave(action);
+                    })().catch((error) =>
+                      Alert.alert('Could not discard draft', errorMessage(error))
+                    );
+                  },
+                },
+              ]
+            : []),
+        ]
+      );
+    },
+    [dirty, leave, loadError, loadingEntry, store, voiceMemo.isRecording, voiceMemo.isFinalizing]
+  );
+  usePreventRemove(
+    !allowExit &&
+      (dirty ||
+        voiceMemo.isRecording ||
+        voiceMemo.isFinalizing ||
+        staging ||
+        saving ||
+        !!pendingSave),
+    ({ data }) => {
+      requestLeave(() => navigation.dispatch(data.action));
+    }
+  );
   useEffect(() => {
     navigation.setOptions({
       headerTitle: isEditMode ? 'Edit Entry' : 'New Entry',
       headerLeft: () => (
-        <TouchableOpacity onPress={handleClose} style={{ padding: 8 }}>
+        <TouchableOpacity onPress={() => requestLeave(navigateAway)} disabled={saving}>
           <Text style={{ color: colors.primary, fontSize: FontSize.md }}>Cancel</Text>
         </TouchableOpacity>
       ),
     });
-  }, [navigation, hasContent, colors.primary, isEditMode]);
+  }, [navigation, isEditMode, requestLeave, navigateAway, saving, colors.primary]);
 
   const handleSave = async (isDraft: boolean) => {
+    if (savingRef.current) return;
+    if (loadingEntry || loadError || !snapshotRef.current || !user || !couple || !store) {
+      Alert.alert('Entry not ready', 'Load your diary successfully before saving.');
+      return;
+    }
+    if (voiceMemo.isRecording || voiceMemo.isFinalizing || stagingRef.current) {
+      Alert.alert('Finish recording', 'Stop the voice memo before saving.');
+      return;
+    }
+    if (!hasContent && !existingImages.length && !hasMemo) {
+      Alert.alert('Add a memory', 'Add text, a photo, or a voice memo before saving.');
+      return;
+    }
     Keyboard.dismiss();
-    if (!couple) {
-      Alert.alert('Error', 'You need to pair with a partner first');
-      return;
-    }
-
-    if (!isDraft && !title.trim() && !content.trim()) {
-      Alert.alert('Error', 'Please add a title or some content');
-      return;
-    }
-
+    savingRef.current = true;
     setSaving(true);
     try {
-      if (isEditMode && entryId) {
-        // ---- EDIT MODE ----
-        // Preserve the entry's current draft status (don't auto-publish)
-        await updateEntry(entryId, {
-          title: title.trim(),
-          content_html: `<p>${content.replace(/\n/g, '</p><p>')}</p>`,
-          content_plain: content,
-          word_count: content.trim() ? content.trim().split(/\s+/).length : 0,
-          mood,
-          entry_date: entryDate,
-          location_name: locationName,
-          location_lat: locationLat,
-          location_lng: locationLng,
-        });
-
-        // Delete removed images
-        if (user) {
-          for (const img of imagesToDelete) {
-            try {
-              await deleteMedia(img.storage_path);
-              await supabase.from('media').delete().eq('id', img.id);
-            } catch (err: any) {
-              console.warn('Failed to delete image:', err.message);
-            }
-          }
-        }
-
-        // Delete existing voice memo if flagged
-        if (deleteExistingVoiceMemo && existingVoiceMemo) {
-          try {
-            await deleteMedia(existingVoiceMemo.storage_path);
-            await supabase.from('media').delete().eq('id', existingVoiceMemo.id);
-          } catch (err: any) {
-            console.warn('Failed to delete voice memo:', err.message);
-          }
-        }
-
-        // Upload new pending images
-        if (pendingImages.length > 0 && user) {
-          for (const asset of pendingImages) {
-            try {
-              const compressed = await compressImage(asset.uri);
-              const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
-              const storagePath = await uploadMedia(
-                compressed,
-                user.id,
-                entryId,
-                fileName,
-                'image/jpeg'
-              );
-              await supabase.from('media').insert({
-                entry_id: entryId,
-                author_id: user.id,
-                storage_path: storagePath,
-                media_type: 'image',
-                mime_type: 'image/jpeg',
-                width: asset.width,
-                height: asset.height,
-              });
-            } catch (uploadErr: any) {
-              console.warn('Image upload failed:', uploadErr.message);
-            }
-          }
-        }
-
-        // Upload new pending voice memo
-        if (pendingVoiceMemo && user) {
-          try {
-            const fileName = `${Date.now()}_voicememo.m4a`;
-            const storagePath = await uploadMedia(
-              pendingVoiceMemo.uri,
-              user.id,
-              entryId,
-              fileName,
-              'audio/mp4'
-            );
-            await supabase.from('media').insert({
-              entry_id: entryId,
-              author_id: user.id,
-              storage_path: storagePath,
-              media_type: 'audio',
-              mime_type: 'audio/mp4',
-              duration_ms: pendingVoiceMemo.durationMs,
-            });
-          } catch (uploadErr: any) {
-            console.warn('Voice memo upload failed:', uploadErr.message);
-          }
-        }
-
-        savedSuccessfully.current = true;
-        router.back();
-      } else {
-        // ---- CREATE MODE ----
-        const entryData: CreateEntryInput = {
-          couple_id: couple.id,
-          title: title.trim(),
-          content_html: `<p>${content.replace(/\n/g, '</p><p>')}</p>`,
-          content_plain: content,
-          word_count: content.trim() ? content.trim().split(/\s+/).length : 0,
-          mood,
-          is_draft: isDraft,
-          entry_date: entryDate,
-          location_name: locationName,
-          location_lat: locationLat,
-          location_lng: locationLng,
-        };
-
-        const entry = await createEntry(entryData);
-
-        // Upload pending images
-        if (pendingImages.length > 0 && user) {
-          for (const asset of pendingImages) {
-            try {
-              const compressed = await compressImage(asset.uri);
-              const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
-              const storagePath = await uploadMedia(
-                compressed,
-                user.id,
-                entry.id,
-                fileName,
-                'image/jpeg'
-              );
-              await supabase.from('media').insert({
-                entry_id: entry.id,
-                author_id: user.id,
-                storage_path: storagePath,
-                media_type: 'image',
-                mime_type: 'image/jpeg',
-                width: asset.width,
-                height: asset.height,
-              });
-            } catch (uploadErr: any) {
-              console.warn('Image upload failed:', uploadErr.message);
-            }
-          }
-        }
-
-        // Upload pending voice memo
-        if (pendingVoiceMemo && user) {
-          try {
-            const fileName = `${Date.now()}_voicememo.m4a`;
-            const storagePath = await uploadMedia(
-              pendingVoiceMemo.uri,
-              user.id,
-              entry.id,
-              fileName,
-              'audio/mp4'
-            );
-            await supabase.from('media').insert({
-              entry_id: entry.id,
-              author_id: user.id,
-              storage_path: storagePath,
-              media_type: 'audio',
-              mime_type: 'audio/mp4',
-              duration_ms: pendingVoiceMemo.durationMs,
-            });
-          } catch (uploadErr: any) {
-            console.warn('Voice memo upload failed:', uploadErr.message);
-          }
-        }
-
-        savedSuccessfully.current = true;
-        await AsyncStorage.removeItem(DRAFT_KEY);
-        navigateAway();
+      const current = snapshotRef.current;
+      const plan = pendingSaveRef.current ?? {
+        operationId: uuid.v4(),
+        entryId: current.entryId,
+        expectedUpdatedAt: current.expectedUpdatedAt,
+        fields: { ...current.fields, is_draft: isEditMode ? originalDraftStatus.current : isDraft },
+        attachments: current.attachments,
+        removeMediaIds: current.removeMediaIds,
+      };
+      pendingSaveRef.current = plan;
+      setPendingSave(plan);
+      await saveEntry(plan, user.id, async (request) => {
+        await store.save({ ...current, fields: request.fields, pendingSave: request });
+      });
+      await store.clear();
+      savedSuccessfully.current = true;
+      try {
+        removeDraftFiles(current);
+      } catch {
+        /* A local orphan is safe to clean up later. */
       }
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
+      entryEvents.emit();
+      leave(navigateAway);
+    } catch (error) {
+      const message = errorMessage(error);
+      const conflict = (error as { code?: string })?.code === '40001';
+      Alert.alert(
+        conflict ? 'Entry changed' : 'Save needs a retry',
+        `${message}\n\nYour draft and attachments are kept on this device.`,
+        [
+          { text: 'Keep Draft', style: 'cancel' },
+          ...(conflict
+            ? [
+                {
+                  text: 'Discard changes & reload',
+                  style: 'destructive' as const,
+                  onPress: () => {
+                    void store
+                      .clear()
+                      .then(() => {
+                        pendingSaveRef.current = null;
+                        setPendingSave(null);
+                        setReload((n) => n + 1);
+                      })
+                      .catch((failure) => Alert.alert('Could not reload', errorMessage(failure)));
+                  },
+                },
+              ]
+            : []),
+        ]
+      );
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -470,7 +519,7 @@ export default function NewEntryScreen() {
   const handleDateChange = (_: unknown, selectedDate?: Date) => {
     setShowDatePicker(false);
     if (selectedDate) {
-      const dateStr = selectedDate.toISOString().split('T')[0];
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
       setEntryDate(dateStr);
     }
   };
@@ -519,7 +568,7 @@ export default function NewEntryScreen() {
         return;
       }
       setLocationResults(results);
-    } catch (e: any) {
+    } catch {
       Alert.alert('Error', 'Could not search for location');
     } finally {
       setLocationSearching(false);
@@ -576,9 +625,49 @@ export default function NewEntryScreen() {
     }
 
     if (!result.canceled && result.assets[0]) {
-      setPendingImages((prev) => [...prev, result.assets[0]]);
+      stagingRef.current = true;
+      setStaging(true);
+      try {
+        if (!user || !couple || !snapshotRef.current) return;
+        const asset = result.assets[0];
+        const draftId = uuid.v4();
+        const compressed = await compressImage(asset.uri);
+        const current = snapshotRef.current;
+        if (!current || current.userId !== user.id || current.coupleId !== couple.id) return;
+        const uri = keepDraftFile(compressed, user.id, couple.id, draftEntryId, `${draftId}.jpg`);
+        const addition: PendingAttachment = {
+          id: draftId,
+          uri,
+          media_type: 'image',
+          mime_type: 'image/jpeg',
+          width: asset.width,
+          height: asset.height,
+        };
+        snapshotRef.current = {
+          ...snapshotRef.current,
+          attachments: [...snapshotRef.current.attachments, addition],
+        };
+        setPendingImages((prev) => [...prev, { ...asset, uri, draftId }]);
+        await store?.save(snapshotRef.current);
+      } catch (error) {
+        Alert.alert('Photo could not be kept', errorMessage(error));
+      } finally {
+        stagingRef.current = false;
+        setStaging(false);
+      }
     }
   };
+
+  if (loadError) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={{ color: colors.error }}>{loadError}</Text>
+        <TouchableOpacity onPress={() => setReload((n) => n + 1)} accessibilityRole="button">
+          <Text style={{ color: colors.primary }}>Retry loading entry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   if (loadingEntry) {
     return (
@@ -598,7 +687,14 @@ export default function NewEntryScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      {draftError && <Text style={{ color: colors.error }}>{draftError}</Text>}
+      {pendingSave && !saving && (
+        <Text style={{ color: colors.textSecondary }}>
+          Your previous save needs a retry. Your words and attachments are kept.
+        </Text>
+      )}
       <ScrollView
+        pointerEvents={saving || pendingSave || staging || voiceMemo.isFinalizing ? 'none' : 'auto'}
         ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -715,7 +811,7 @@ export default function NewEntryScreen() {
               </View>
             ))}
             {pendingImages.map((asset, index) => (
-              <View key={`pending-${index}`} style={styles.imageThumbContainer}>
+              <View key={asset.draftId} style={styles.imageThumbContainer}>
                 <Image source={{ uri: asset.uri }} style={styles.imageThumb} />
                 <TouchableOpacity
                   style={styles.imageRemoveButton}
@@ -824,13 +920,6 @@ export default function NewEntryScreen() {
           multiline
           textAlignVertical="top"
           scrollEnabled={false}
-          onContentSizeChange={(e) => {
-            // Scroll to keep the cursor visible as the user types onto new lines
-            const contentHeight = e.nativeEvent.contentSize.height;
-            if (contentHeight > 200) {
-              scrollViewRef.current?.scrollToEnd({ animated: true });
-            }
-          }}
         />
       </ScrollView>
 
@@ -856,7 +945,12 @@ export default function NewEntryScreen() {
       <View
         style={[styles.toolbar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}
       >
-        <View style={styles.toolbarLeft}>
+        <View
+          style={styles.toolbarLeft}
+          pointerEvents={
+            saving || pendingSave || staging || voiceMemo.isFinalizing ? 'none' : 'auto'
+          }
+        >
           <TouchableOpacity style={styles.toolbarButton} onPress={handleAddImage}>
             <FontAwesome name="image" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
@@ -896,7 +990,14 @@ export default function NewEntryScreen() {
             <TouchableOpacity
               style={[styles.draftButton, { borderColor: colors.border }]}
               onPress={() => handleSave(true)}
-              disabled={saving}
+              disabled={
+                saving ||
+                loadingEntry ||
+                !!loadError ||
+                voiceMemo.isRecording ||
+                voiceMemo.isFinalizing ||
+                staging
+              }
             >
               <Text style={[styles.draftButtonText, { color: colors.textSecondary }]}>
                 Save Draft
@@ -906,10 +1007,23 @@ export default function NewEntryScreen() {
           <TouchableOpacity
             style={[styles.publishButton, { backgroundColor: colors.primary }]}
             onPress={() => handleSave(false)}
-            disabled={saving}
+            disabled={
+              saving ||
+              loadingEntry ||
+              !!loadError ||
+              voiceMemo.isRecording ||
+              voiceMemo.isFinalizing ||
+              staging
+            }
           >
             <Text style={styles.publishButtonText}>
-              {saving ? 'Saving...' : isEditMode ? 'Save Changes' : 'Publish'}
+              {saving
+                ? 'Saving...'
+                : pendingSave
+                  ? 'Retry Save'
+                  : isEditMode
+                    ? 'Save Changes'
+                    : 'Publish'}
             </Text>
           </TouchableOpacity>
         </View>

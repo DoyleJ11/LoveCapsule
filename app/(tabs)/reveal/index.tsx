@@ -423,8 +423,8 @@ export default function RevealScreen() {
   const handleCheckpointReveal = async () => {
     if (!couple) return;
     const configId = todaysCheckpoints.length > 0 ? todaysCheckpoints[0].id : undefined;
-    await revealCheckpointEntry(couple.id, configId);
-    setShowCheckpointEntry(true);
+    const success = await revealCheckpointEntry(couple.id, configId);
+    if (success) setShowCheckpointEntry(true);
   };
 
   // Handle viewing checkpoint history
