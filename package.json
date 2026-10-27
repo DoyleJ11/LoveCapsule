@@ -1,22 +1,25 @@
 {
   "name": "timecapsule-diary-app",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx --max-warnings 25",
     "lint:fix": "eslint . --ext .ts,.tsx,.js,.jsx --fix",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run routes:generate && tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:ci": "jest --ci --coverage --maxWorkers=2",
-    "validate": "npm run lint && npm run typecheck && npm run test",
-    "prepare": "husky"
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm run test",
+    "prepare": "husky",
+    "routes:generate": "node scripts/generate-routes.cjs",
+    "test:edge": "deno check supabase/functions/check-anniversary/index.ts supabase/functions/maintenance/index.ts supabase/functions/notify-partner/index.ts && deno test supabase/functions/maintenance/tests",
+    "types:database": "python3 scripts/generate_database_types.py"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
@@ -47,6 +50,7 @@
     "expo-image-picker": "~17.0.10",
     "expo-linking": "~8.0.11",
     "expo-location": "~19.0.8",
+    "expo-modules-core": "~3.0.29",
     "expo-notifications": "~0.32.16",
     "expo-router": "~6.0.22",
     "expo-secure-store": "~15.0.8",

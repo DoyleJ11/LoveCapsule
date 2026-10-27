@@ -15,7 +15,8 @@ coverage/
 
 # Environment variables
 .env
-.env.local
+.env.*
+!.env.example
 
 # Certificates and keys
 *.jks
@@ -42,3 +43,7 @@ supabase/.temp/
 
 expo-env.d.ts
 # @end expo-cli
+
+# Python database test artifacts
+__pycache__/
+*.pyc

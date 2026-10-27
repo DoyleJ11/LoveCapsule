@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react';
+import { errorMessage } from '../lib/errors';
+import { useState, useCallback, useRef } from 'react';
+import { useCouple } from '../providers/CoupleProvider';
 import { supabase } from '../lib/supabase';
 import type {
   CheckpointConfig,
-  CheckpointFrequency,
   CheckpointEntryResponse,
   CheckpointHistoryItem,
   CheckpointTodayResponse,
@@ -25,13 +26,20 @@ interface UseCheckpointReturn {
   revealEntry: (coupleId: string, configId?: string) => Promise<boolean>;
   loadHistory: (coupleId: string) => Promise<void>;
   loadUnrevealedCount: (coupleId: string) => Promise<void>;
-  createConfig: (config: Omit<CheckpointConfig, 'id' | 'created_at'>) => Promise<void>;
+  createConfig: (
+    config: Omit<CheckpointConfig, 'id' | 'created_at'> & { id?: string }
+  ) => Promise<void>;
   updateConfig: (id: string, updates: Partial<CheckpointConfig>) => Promise<void>;
   deleteConfig: (id: string) => Promise<void>;
   reset: () => void;
 }
 
 export function useCheckpoint(): UseCheckpointReturn {
+  const { refresh, couple } = useCouple();
+  const activeCouple = useRef(couple?.id);
+  activeCouple.current = couple?.id;
+  const [configsScope, setConfigsScope] = useState<string>();
+  const inFlight = useRef(false);
   const [configs, setConfigs] = useState<CheckpointConfig[]>([]);
   const [isCheckpointDay, setIsCheckpointDay] = useState(false);
   const [todaysCheckpoints, setTodaysCheckpoints] = useState<
@@ -46,6 +54,7 @@ export function useCheckpoint(): UseCheckpointReturn {
   const [error, setError] = useState<string | null>(null);
 
   const loadConfigs = useCallback(async (coupleId: string) => {
+    if (activeCouple.current !== coupleId) return;
     try {
       const { data, error: fetchError } = await supabase
         .from('checkpoint_configs')
@@ -54,9 +63,11 @@ export function useCheckpoint(): UseCheckpointReturn {
         .order('created_at', { ascending: true });
 
       if (fetchError) throw fetchError;
+      if (activeCouple.current !== coupleId) return;
+      setConfigsScope(coupleId);
       setConfigs(data ?? []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
     }
   }, []);
 
@@ -71,12 +82,17 @@ export function useCheckpoint(): UseCheckpointReturn {
       const response = data as CheckpointTodayResponse;
       setIsCheckpointDay(response.is_checkpoint_day);
       setTodaysCheckpoints(response.checkpoints);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
     }
   }, []);
 
   const revealEntry = useCallback(async (coupleId: string, configId?: string): Promise<boolean> => {
+    if (inFlight.current) return false;
+    inFlight.current = true;
+    setCheckpointEntry(null);
+    setAlreadyRevealed(false);
+    setNoEntriesRemaining(false);
     setLoading(true);
     setError(null);
 
@@ -88,6 +104,7 @@ export function useCheckpoint(): UseCheckpointReturn {
 
       if (revealError) throw revealError;
 
+      if (!data) throw new Error('Reveal confirmation was not received. Please retry.');
       const response = data as CheckpointEntryResponse;
 
       if (response.error) {
@@ -98,11 +115,12 @@ export function useCheckpoint(): UseCheckpointReturn {
       setAlreadyRevealed(response.already_revealed);
       setNoEntriesRemaining(response.no_entries);
 
-      return !response.no_entries;
-    } catch (e: any) {
-      setError(e.message);
+      return true;
+    } catch (e: unknown) {
+      setError(errorMessage(e));
       return false;
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   }, []);
@@ -115,8 +133,8 @@ export function useCheckpoint(): UseCheckpointReturn {
 
       if (historyError) throw historyError;
       setCheckpointHistory(data ?? []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
     }
   }, []);
 
@@ -128,76 +146,97 @@ export function useCheckpoint(): UseCheckpointReturn {
 
       if (countError) throw countError;
       setUnrevealedCount(data ?? 0);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
     }
   }, []);
 
   const createConfig = useCallback(
-    async (config: Omit<CheckpointConfig, 'id' | 'created_at'>) => {
+    async (config: Omit<CheckpointConfig, 'id' | 'created_at'> & { id?: string }) => {
       setLoading(true);
       setError(null);
 
       try {
-        const { error: insertError } = await supabase.from('checkpoint_configs').insert(config);
+        const { error: insertError } = await supabase.rpc('save_checkpoint_schedule', {
+          p_couple_id: config.couple_id,
+          p_id: config.id ?? null,
+          p_expected_version: null,
+          p_config: { ...config },
+        });
 
         if (insertError) throw insertError;
 
         // Reload configs
         await loadConfigs(config.couple_id);
-      } catch (e: any) {
-        setError(e.message);
+        await refresh();
+      } catch (e: unknown) {
+        setError(errorMessage(e));
         throw e;
       } finally {
         setLoading(false);
       }
     },
-    [loadConfigs]
+    [loadConfigs, refresh]
   );
 
-  const updateConfig = useCallback(async (id: string, updates: Partial<CheckpointConfig>) => {
-    setLoading(true);
-    setError(null);
+  const updateConfig = useCallback(
+    async (id: string, updates: Partial<CheckpointConfig>) => {
+      setLoading(true);
+      setError(null);
 
-    try {
-      const { error: updateError } = await supabase
-        .from('checkpoint_configs')
-        .update(updates)
-        .eq('id', id);
+      try {
+        const existing = configs.find((c) => c.id === id);
+        if (!existing) throw new Error('Reload schedules and try again.');
+        const { error: updateError } = await supabase.rpc('save_checkpoint_schedule', {
+          p_couple_id: existing.couple_id,
+          p_id: id,
+          p_expected_version: updates.version ?? existing.version ?? 1,
+          p_config: { ...existing, ...updates },
+        });
+        await loadConfigs(existing.couple_id);
+        await refresh();
 
-      if (updateError) throw updateError;
+        if (updateError) throw updateError;
 
-      // update local state
-      setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
-    } catch (e: any) {
-      setError(e.message);
-      throw e;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+        // update local state
+      } catch (e: unknown) {
+        setError(errorMessage(e));
+        throw e;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [configs, loadConfigs, refresh]
+  );
 
-  const deleteConfig = useCallback(async (id: string) => {
-    setLoading(true);
-    setError(null);
+  const deleteConfig = useCallback(
+    async (id: string) => {
+      setLoading(true);
+      setError(null);
 
-    try {
-      const { error: deleteError } = await supabase
-        .from('checkpoint_configs')
-        .delete()
-        .eq('id', id);
+      try {
+        const existing = configs.find((c) => c.id === id);
+        if (!existing) throw new Error('Reload schedules and try again.');
+        const { error: deleteError } = await supabase.rpc('delete_checkpoint_schedule', {
+          p_couple_id: existing.couple_id,
+          p_id: id,
+          p_expected_version: existing.version ?? 1,
+        });
+        await refresh();
 
-      if (deleteError) throw deleteError;
+        if (deleteError) throw deleteError;
 
-      // update local state
-      setConfigs((prev) => prev.filter((c) => c.id !== id));
-    } catch (e: any) {
-      setError(e.message);
-      throw e;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+        // update local state
+        setConfigs((prev) => prev.filter((c) => c.id !== id));
+      } catch (e: unknown) {
+        setError(errorMessage(e));
+        throw e;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [configs, refresh]
+  );
 
   const reset = useCallback(() => {
     setCheckpointEntry(null);
@@ -207,7 +246,7 @@ export function useCheckpoint(): UseCheckpointReturn {
   }, []);
 
   return {
-    configs,
+    configs: configsScope === couple?.id ? configs : [],
     isCheckpointDay,
     todaysCheckpoints,
     checkpointEntry,

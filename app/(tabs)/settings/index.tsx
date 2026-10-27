@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+import { diagnosticSnapshot } from '../../../src/lib/diagnostics';
+import { errorMessage } from '../../../src/lib/errors';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,6 +18,15 @@ import {
   SafeAreaView,
   Switch,
 } from 'react-native';
+import { uuid } from 'expo-modules-core';
+import { useFocusEffect } from '@react-navigation/native';
+import { AnnualScheduleEditor } from '../../../src/features/reveals/AnnualScheduleEditor';
+import { ScheduleFields } from '../../../src/features/reveals/ScheduleFields';
+import {
+  calendarDate,
+  validTimezone,
+  formatRevealInstant,
+} from '../../../src/features/reveals/time';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
@@ -29,19 +40,18 @@ import {
   formatEntryDate,
   formatCheckpointFrequency,
   formatCheckpointDescription,
-  getNextCheckpointDate,
-  formatNextCheckpointDate,
 } from '../../../src/lib/date-utils';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../../src/constants/theme';
-import { VALENTINE_STORAGE_KEY } from '../../../src/lib/valentine';
+import { registerForPushNotifications, unregisterPushDevice } from '../../../src/lib/notifications';
+import { requestDeletion } from '../../../src/features/account/deletion';
+import { uuid as avatarUuid } from 'expo-modules-core';
 import type { CheckpointConfig, CheckpointFrequency } from '../../../src/types/database';
 
 const FREQUENCY_OPTIONS: { value: CheckpointFrequency; label: string }[] = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'quarterly', label: 'Quarterly' },
   { value: 'semi_annual', label: 'Every 6 months' },
-  { value: 'specific_date', label: 'Specific date' },
+  { value: 'specific_date', label: 'One-time date' },
 ];
 
 const DAY_OPTIONS = Array.from({ length: 28 }, (_, i) => i + 1);
@@ -53,9 +63,9 @@ export default function SettingsScreen() {
     partner,
     createCouple,
     joinCouple,
-    setAnniversaryDate,
+    overview,
+    refresh,
     unpairCouple,
-    loading,
     profileAvatarUrl: avatarUrl,
     partnerAvatarUrl,
     refreshProfileAvatar,
@@ -74,16 +84,19 @@ export default function SettingsScreen() {
 
   const [inviteInput, setInviteInput] = useState('');
   const [joiningLoading, setJoiningLoading] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(profile?.display_name || '');
   // Checkpoint modal state
+  const checkpointCreateId = useRef<string | null>(null);
+  const [checkpointModalScope, setCheckpointModalScope] = useState<string>();
   const [showCheckpointModal, setShowCheckpointModal] = useState(false);
   const [editingCheckpoint, setEditingCheckpoint] = useState<CheckpointConfig | null>(null);
   const [checkpointFrequency, setCheckpointFrequency] = useState<CheckpointFrequency>('monthly');
   const [checkpointDay, setCheckpointDay] = useState(15);
-  const [checkpointMonths, setCheckpointMonths] = useState<number[]>([3, 6, 9, 12]);
+  const [, setCheckpointMonths] = useState<number[]>([3, 6, 9, 12]);
   const [checkpointSpecificDate, setCheckpointSpecificDate] = useState<Date>(new Date());
+  const [checkpointTime, setCheckpointTime] = useState('00:00');
+  const [checkpointZone, setCheckpointZone] = useState('UTC');
   const [checkpointLabel, setCheckpointLabel] = useState('');
   const [checkpointActive, setCheckpointActive] = useState(true);
   const [showCheckpointDatePicker, setShowCheckpointDatePicker] = useState(false);
@@ -93,9 +106,20 @@ export default function SettingsScreen() {
     if (couple?.id && partner) {
       loadConfigs(couple.id);
     }
-  }, [couple?.id, partner, loadConfigs]);
+  }, [couple?.id, partner, loadConfigs, overview?.server_now]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refresh();
+    }, [refresh])
+  );
 
   const openCheckpointModal = (config?: CheckpointConfig) => {
+    setCheckpointModalScope(`${user?.id}:${couple?.id}`);
+    setShowCheckpointDatePicker(false);
+    checkpointCreateId.current = config?.id ?? uuid.v4();
+    setCheckpointTime(config?.reveal_time ?? couple?.reveal_time ?? '00:00');
+    setCheckpointZone(config?.timezone ?? couple?.reveal_timezone ?? 'UTC');
     if (config) {
       setEditingCheckpoint(config);
       setCheckpointFrequency(config.frequency);
@@ -122,7 +146,10 @@ export default function SettingsScreen() {
     if (!couple) return;
 
     try {
+      if (!validTimezone(checkpointZone.trim())) throw new Error('Choose a valid IANA timezone.');
       const configData = {
+        id: checkpointCreateId.current!,
+        version: editingCheckpoint?.version ?? undefined,
         couple_id: couple.id,
         frequency: checkpointFrequency,
         day_of_month: checkpointFrequency !== 'specific_date' ? checkpointDay : null,
@@ -133,10 +160,10 @@ export default function SettingsScreen() {
               ? [6, 12]
               : null,
         specific_date:
-          checkpointFrequency === 'specific_date'
-            ? checkpointSpecificDate.toISOString().split('T')[0]
-            : null,
+          checkpointFrequency === 'specific_date' ? calendarDate(checkpointSpecificDate) : null,
         label: checkpointLabel.trim() || null,
+        reveal_time: checkpointTime,
+        timezone: checkpointZone.trim(),
         is_active: checkpointActive,
       };
 
@@ -147,8 +174,8 @@ export default function SettingsScreen() {
       }
 
       setShowCheckpointModal(false);
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
+    } catch (e: unknown) {
+      Alert.alert('Error', errorMessage(e));
     }
   };
 
@@ -164,8 +191,8 @@ export default function SettingsScreen() {
           onPress: async () => {
             try {
               await deleteConfig(config.id);
-            } catch (e: any) {
-              Alert.alert('Error', e.message);
+            } catch (e: unknown) {
+              Alert.alert('Error', errorMessage(e));
             }
           },
         },
@@ -183,8 +210,8 @@ export default function SettingsScreen() {
       if (error) throw error;
       await refreshProfile();
       setEditingName(false);
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
+    } catch (e: unknown) {
+      Alert.alert('Error', errorMessage(e));
     }
   };
 
@@ -232,7 +259,7 @@ export default function SettingsScreen() {
         compressed,
         user.id,
         'avatars',
-        'avatar.jpg',
+        `${avatarUuid.v4()}.jpg`,
         'image/jpeg'
       );
       const { error } = await supabase
@@ -242,8 +269,8 @@ export default function SettingsScreen() {
       if (error) throw error;
       await refreshProfileAvatar(storagePath);
       await refreshProfile();
-    } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to update profile picture');
+    } catch (e: unknown) {
+      Alert.alert('Error', errorMessage(e) || 'Failed to update profile picture');
     }
   };
 
@@ -251,8 +278,8 @@ export default function SettingsScreen() {
     try {
       const code = await createCouple();
       Alert.alert('Invite Code Created', `Share this code with your partner: ${code}`);
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
+    } catch (e: unknown) {
+      Alert.alert('Error', errorMessage(e));
     }
   };
 
@@ -267,8 +294,8 @@ export default function SettingsScreen() {
       await joinCouple(inviteInput.trim());
       Alert.alert('Success', 'You are now connected with your partner!');
       setInviteInput('');
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
+    } catch (e: unknown) {
+      Alert.alert('Error', errorMessage(e));
     } finally {
       setJoiningLoading(false);
     }
@@ -278,29 +305,17 @@ export default function SettingsScreen() {
     if (!couple?.invite_code) return;
     try {
       await Share.share({
-        message: `Join my TimeCapsule! Use this invite code: ${couple.invite_code}`,
+        message: `Join my LoveCapsule! Use this invite code: ${couple.invite_code}`,
       });
-    } catch (e) {
+    } catch {
       // User cancelled share
-    }
-  };
-
-  const handleDateChange = async (_: any, selectedDate?: Date) => {
-    setShowDatePicker(Platform.OS === 'ios');
-    if (selectedDate) {
-      const dateStr = selectedDate.toISOString().split('T')[0];
-      try {
-        await setAnniversaryDate(dateStr);
-      } catch (e: any) {
-        Alert.alert('Error', e.message);
-      }
     }
   };
 
   const handleUnpair = () => {
     Alert.alert(
       'Unpair from Partner',
-      'Are you sure you want to unpair? This will permanently delete ALL diary entries, photos, and memories for BOTH you and your partner. This cannot be undone.',
+      'Are you sure you want to unpair? This will permanently delete ALL diary entries, photos, and memories for BOTH you and your partner. Private file cleanup may continue in the background. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -312,10 +327,10 @@ export default function SettingsScreen() {
               await unpairCouple();
               Alert.alert(
                 'Unpaired',
-                'You have been unpaired from your partner. All shared data has been deleted.'
+                'You are unpaired and the shared diary records have been removed. Private file cleanup is queued and continues in the background.'
               );
-            } catch (e: any) {
-              Alert.alert('Error', e.message);
+            } catch (e: unknown) {
+              Alert.alert('Error', errorMessage(e));
             } finally {
               setUnpairingLoading(false);
             }
@@ -334,17 +349,12 @@ export default function SettingsScreen() {
         onPress: async () => {
           try {
             await signOut();
-          } catch (e: any) {
-            Alert.alert('Error', e.message);
+          } catch (e: unknown) {
+            Alert.alert('Error', errorMessage(e));
           }
         },
       },
     ]);
-  };
-
-  const handleResetValentine = async () => {
-    await AsyncStorage.removeItem(VALENTINE_STORAGE_KEY);
-    Alert.alert('Done', 'Valentine surprise reset. Reload the app to see it again.');
   };
 
   return (
@@ -358,7 +368,11 @@ export default function SettingsScreen() {
       >
         <Text style={[styles.sectionTitle, { color: colors.text }]}>Profile</Text>
         <View style={styles.profileRow}>
-          <TouchableOpacity onPress={handleChangeAvatar}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Change profile photo"
+            onPress={handleChangeAvatar}
+          >
             {avatarUrl ? (
               <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
             ) : (
@@ -382,10 +396,15 @@ export default function SettingsScreen() {
                   autoFocus
                   autoCapitalize="words"
                 />
-                <TouchableOpacity onPress={handleUpdateName}>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Save display name"
+                  onPress={handleUpdateName}
+                >
                   <FontAwesome name="check" size={18} color={colors.primary} />
                 </TouchableOpacity>
                 <TouchableOpacity
+                  accessibilityRole="button"
                   onPress={() => {
                     setEditingName(false);
                     setNameInput(profile?.display_name || '');
@@ -396,6 +415,7 @@ export default function SettingsScreen() {
               </View>
             ) : (
               <TouchableOpacity
+                accessibilityRole="button"
                 onPress={() => {
                   setEditingName(true);
                   setNameInput(profile?.display_name || '');
@@ -421,6 +441,7 @@ export default function SettingsScreen() {
         {!couple ? (
           <>
             <TouchableOpacity
+              accessibilityRole="button"
               style={[styles.actionButton, { backgroundColor: colors.primary }]}
               onPress={handleCreateCouple}
             >
@@ -446,6 +467,7 @@ export default function SettingsScreen() {
               autoCapitalize="none"
             />
             <TouchableOpacity
+              accessibilityRole="button"
               style={[styles.actionButton, { backgroundColor: colors.accent }]}
               onPress={handleJoinCouple}
               disabled={joiningLoading}
@@ -469,6 +491,7 @@ export default function SettingsScreen() {
               <Text style={[styles.codeText, { color: colors.primary }]}>{couple.invite_code}</Text>
             </View>
             <TouchableOpacity
+              accessibilityRole="button"
               style={[styles.actionButton, { backgroundColor: colors.primary }]}
               onPress={handleShareCode}
             >
@@ -499,6 +522,7 @@ export default function SettingsScreen() {
               autoCapitalize="none"
             />
             <TouchableOpacity
+              accessibilityRole="button"
               style={[styles.actionButton, { backgroundColor: colors.accent }]}
               onPress={handleJoinCouple}
               disabled={joiningLoading}
@@ -528,6 +552,7 @@ export default function SettingsScreen() {
               </View>
             </View>
             <TouchableOpacity
+              accessibilityRole="button"
               style={[styles.unpairButton, { borderColor: colors.error }]}
               onPress={handleUnpair}
               disabled={unpairingLoading}
@@ -546,35 +571,7 @@ export default function SettingsScreen() {
         <View
           style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}
         >
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Anniversary Date</Text>
-          {couple.anniversary_date ? (
-            <Text style={[styles.dateDisplay, { color: colors.text }]}>
-              {formatEntryDate(couple.anniversary_date)}
-            </Text>
-          ) : (
-            <Text style={[styles.infoText, { color: colors.textSecondary }]}>No date set yet</Text>
-          )}
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.secondary }]}
-            onPress={() => setShowDatePicker(true)}
-          >
-            <FontAwesome name="calendar" size={16} color="#fff" />
-            <Text style={styles.actionButtonText}>
-              {couple.anniversary_date ? 'Change Date' : 'Set Anniversary Date'}
-            </Text>
-          </TouchableOpacity>
-          {showDatePicker && (
-            <DateTimePicker
-              value={
-                couple.anniversary_date
-                  ? new Date(couple.anniversary_date + 'T00:00:00')
-                  : new Date()
-              }
-              mode="date"
-              display="spinner"
-              onChange={handleDateChange}
-            />
-          )}
+          <AnnualScheduleEditor />
         </View>
       )}
 
@@ -588,7 +585,9 @@ export default function SettingsScreen() {
               Checkpoints
             </Text>
             <TouchableOpacity
+              accessibilityRole="button"
               style={[styles.addButton, { backgroundColor: colors.primary }]}
+              accessibilityLabel="Add reveal checkpoint"
               onPress={() => openCheckpointModal()}
             >
               <FontAwesome name="plus" size={14} color="#fff" />
@@ -625,19 +624,25 @@ export default function SettingsScreen() {
                       </Text>
                       <Text style={[styles.checkpointItemSubtitle, { color: colors.textMuted }]}>
                         {formatCheckpointFrequency(config.frequency, config.specific_date)}
+                        {` · ${config.reveal_time?.slice(0, 5) ?? '00:00'} · ${config.timezone ?? 'UTC'}`}
                         {!config.is_active && ' (Paused)'}
+                        {config.schedule_error && ` · ${config.schedule_error}`}
                       </Text>
                     </View>
                   </View>
                   <View style={styles.checkpointItemActions}>
                     <TouchableOpacity
+                      accessibilityRole="button"
                       style={styles.checkpointItemButton}
+                      accessibilityLabel={`Edit ${config.label || 'checkpoint'}`}
                       onPress={() => openCheckpointModal(config)}
                     >
                       <FontAwesome name="pencil" size={14} color={colors.textSecondary} />
                     </TouchableOpacity>
                     <TouchableOpacity
+                      accessibilityRole="button"
                       style={styles.checkpointItemButton}
+                      accessibilityLabel={`Delete ${config.label || 'checkpoint'}`}
                       onPress={() => handleDeleteCheckpoint(config)}
                     >
                       <FontAwesome name="trash" size={14} color={colors.error} />
@@ -650,7 +655,13 @@ export default function SettingsScreen() {
 
           {checkpointConfigs.length > 0 && (
             <Text style={[styles.nextCheckpointText, { color: colors.textSecondary }]}>
-              Next checkpoint: {formatNextCheckpointDate(getNextCheckpointDate(checkpointConfigs))}
+              Next checkpoint:{' '}
+              {overview?.checkpoints[0]
+                ? formatRevealInstant(
+                    overview.checkpoints[0].due_at,
+                    overview.checkpoints[0].timezone
+                  )
+                : 'No pending checkpoint'}
             </Text>
           )}
         </View>
@@ -658,7 +669,7 @@ export default function SettingsScreen() {
 
       {/* Checkpoint Config Modal */}
       <Modal
-        visible={showCheckpointModal}
+        visible={showCheckpointModal && checkpointModalScope === `${user?.id}:${couple?.id}`}
         animationType="slide"
         presentationStyle="pageSheet"
         onRequestClose={() => setShowCheckpointModal(false)}
@@ -678,7 +689,11 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentInner}>
+          <ScrollView
+            pointerEvents={checkpointLoading ? 'none' : 'auto'}
+            style={styles.modalContent}
+            contentContainerStyle={styles.modalContentInner}
+          >
             {/* Label */}
             <View style={styles.formGroup}>
               <Text style={[styles.formLabel, { color: colors.text }]}>Label (optional)</Text>
@@ -704,6 +719,7 @@ export default function SettingsScreen() {
               <View style={styles.frequencyOptions}>
                 {FREQUENCY_OPTIONS.map((opt) => (
                   <TouchableOpacity
+                    accessibilityRole="button"
                     key={opt.value}
                     style={[
                       styles.frequencyOption,
@@ -742,6 +758,7 @@ export default function SettingsScreen() {
                 >
                   {DAY_OPTIONS.map((day) => (
                     <TouchableOpacity
+                      accessibilityRole="button"
                       key={day}
                       style={[
                         styles.dayOption,
@@ -772,6 +789,7 @@ export default function SettingsScreen() {
               <View style={styles.formGroup}>
                 <Text style={[styles.formLabel, { color: colors.text }]}>Date</Text>
                 <TouchableOpacity
+                  accessibilityRole="button"
                   style={[
                     styles.dateButton,
                     { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
@@ -780,7 +798,7 @@ export default function SettingsScreen() {
                 >
                   <FontAwesome name="calendar" size={16} color={colors.textSecondary} />
                   <Text style={[styles.dateButtonText, { color: colors.text }]}>
-                    {formatEntryDate(checkpointSpecificDate.toISOString().split('T')[0])}
+                    {formatEntryDate(calendarDate(checkpointSpecificDate))}
                   </Text>
                 </TouchableOpacity>
                 {showCheckpointDatePicker && (
@@ -797,6 +815,19 @@ export default function SettingsScreen() {
               </View>
             )}
 
+            <ScheduleFields
+              time={checkpointTime}
+              zone={checkpointZone}
+              onTime={setCheckpointTime}
+              onZone={setCheckpointZone}
+            />
+            <Text style={{ color: colors.textSecondary, marginVertical: Spacing.md }}>
+              {checkpointFrequency === 'specific_date'
+                ? `One time on ${calendarDate(checkpointSpecificDate)}`
+                : 'Repeats on the selected days'}{' '}
+              at {checkpointTime.slice(0, 5)} · {checkpointZone}. Missed reveals stay available.
+              Changes affect future occurrences; already due or opened reveals stay saved.
+            </Text>
             {/* Active Toggle */}
             <View style={[styles.formGroup, styles.toggleRow]}>
               <View>
@@ -804,7 +835,7 @@ export default function SettingsScreen() {
                   Active
                 </Text>
                 <Text style={[styles.formHint, { color: colors.textMuted }]}>
-                  Pause to temporarily disable
+                  Pause future occurrences; due reveals stay saved
                 </Text>
               </View>
               <Switch
@@ -817,26 +848,97 @@ export default function SettingsScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* Dev Tools (only in development) */}
-      {__DEV__ && (
-        <View
-          style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      <View style={[styles.section, { backgroundColor: colors.surface }]}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Privacy on this phone</Text>
+        <Text style={{ color: colors.textSecondary }}>
+          Draft text and sessions are encrypted in Keychain. Unsaved attachments stay in this app’s
+          private files. Signing out keeps drafts for your next sign-in; unpairing or deleting your
+          account removes local drafts on this phone. Other phones can retain their local drafts;
+          removing the app may also leave Keychain data. This app does not provide end-to-end
+          encryption or a separate biometric lock.
+        </Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={() =>
+            Alert.alert(
+              'Recent diagnostics',
+              JSON.stringify(diagnosticSnapshot(), null, 2) || 'No recent failures.'
+            )
+          }
         >
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Dev Tools</Text>
-          <TouchableOpacity
-            style={[styles.signOutButton, { borderColor: colors.primary, marginTop: 0 }]}
-            onPress={handleResetValentine}
-          >
-            <FontAwesome name="refresh" size={16} color={colors.primary} />
-            <Text style={[styles.signOutText, { color: colors.primary }]}>
-              Reset Valentine Surprise
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+          <Text style={{ color: colors.primary }}>View recent diagnostic references</Text>
+        </TouchableOpacity>
+      </View>
+      <View
+        style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      >
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Notifications</Text>
+        <Text style={{ color: colors.textSecondary }}>
+          Optional reminders contain no diary text. Reveals work even when notifications are off.
+        </Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={async () => {
+            try {
+              const token = await registerForPushNotifications(user!.id, true);
+              await refreshProfile();
+              Alert.alert(
+                'Notifications',
+                token
+                  ? 'Enabled on this phone.'
+                  : 'Allow notifications in iPhone Settings to enable reminders.'
+              );
+            } catch (e) {
+              Alert.alert('Notifications', errorMessage(e));
+            }
+          }}
+        >
+          <Text style={{ color: colors.primary }}>Enable on this phone</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={async () => {
+            try {
+              await unregisterPushDevice();
+              Alert.alert('Notifications', 'Disabled on this phone.');
+            } catch {
+              Alert.alert('Notifications', 'Could not update registration. Please retry.');
+            }
+          }}
+        >
+          <Text style={{ color: colors.primary }}>Disable on this phone</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={() =>
+            Alert.alert(
+              'Delete account?',
+              'This removes your account and the shared diary for both partners. Private file cleanup continues securely in the background. This cannot be undone.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete account',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await requestDeletion('account', user!.id);
+                      await signOut();
+                    } catch (e) {
+                      Alert.alert('Deletion', errorMessage(e));
+                    }
+                  },
+                },
+              ]
+            )
+          }
+        >
+          <Text style={{ color: colors.error }}>Delete my account and shared diary</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Sign Out */}
       <TouchableOpacity
+        accessibilityRole="button"
         style={[styles.signOutButton, { borderColor: colors.error }]}
         onPress={handleSignOut}
       >
@@ -989,11 +1091,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: 2,
   },
-  dateDisplay: {
-    fontSize: FontSize.lg,
-    fontWeight: '500',
-    marginBottom: Spacing.sm,
-  },
   signOutButton: {
     flexDirection: 'row',
     height: 44,
@@ -1084,6 +1181,10 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   checkpointItemButton: {
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
     padding: Spacing.xs,
   },
   nextCheckpointText: {

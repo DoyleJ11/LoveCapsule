@@ -1,15 +1,22 @@
 import { useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, useColorScheme } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  useColorScheme,
+  Button,
+} from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useAuth } from '../../../src/providers/AuthProvider';
 import { useCouple } from '../../../src/providers/CoupleProvider';
 import { useEntries } from '../../../src/hooks/useEntries';
 import { formatRelativeDay } from '../../../src/lib/date-utils';
 import { Colors, Spacing, FontSize, BorderRadius, Moods } from '../../../src/constants/theme';
-import type { Entry } from '../../../src/types/database';
+import type { EntrySummary } from '../../../src/types/database';
 
-function EntryCard({ entry, colors }: { entry: Entry; colors: any }) {
+function EntryCard({ entry, colors }: { entry: EntrySummary; colors: (typeof Colors)['light'] }) {
   const router = useRouter();
   const mood = Moods.find((m) => m.key === entry.mood);
 
@@ -61,7 +68,14 @@ function EntryCard({ entry, colors }: { entry: Entry; colors: any }) {
 
 export default function EntriesListScreen() {
   const { couple, loading: coupleLoading } = useCouple();
-  const { entries, loading: entriesLoading, refresh } = useEntries(couple?.id);
+  const {
+    entries,
+    loading: entriesLoading,
+    error,
+    hasMore,
+    loadMore,
+    refresh,
+  } = useEntries(couple?.id);
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -87,6 +101,14 @@ export default function EntriesListScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {error && (
+        <View>
+          <Text accessibilityRole="alert" style={{ color: colors.error }}>
+            {error}
+          </Text>
+          <Button title="Retry diary" onPress={() => void refresh()} />
+        </View>
+      )}
       <FlatList
         data={entries}
         keyExtractor={(item) => item.id}
@@ -94,11 +116,23 @@ export default function EntriesListScreen() {
         contentContainerStyle={styles.listContent}
         onRefresh={refresh}
         refreshing={loading}
+        onEndReached={() => {
+          if (hasMore && !loading) void loadMore();
+        }}
+        ListFooterComponent={
+          hasMore ? (
+            <Button title="Load more notes" disabled={loading} onPress={() => void loadMore()} />
+          ) : null
+        }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <FontAwesome name="book" size={48} color={colors.textMuted} />
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              No entries yet. Start writing!
+              {loading
+                ? 'Loading your diary…'
+                : error
+                  ? 'Your diary could not be loaded. Your notes are still saved.'
+                  : 'No entries yet. Start writing!'}
             </Text>
           </View>
         }
@@ -106,6 +140,8 @@ export default function EntriesListScreen() {
 
       {/* Floating Action Button */}
       <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Write a note"
         style={[styles.fab, { backgroundColor: colors.primary }]}
         onPress={() => router.push('/(tabs)/entries/new')}
       >

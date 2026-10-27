@@ -2,7 +2,7 @@ name: PR Checks
 
 on:
   pull_request:
-    branches: [main, master]
+    branches: [dev, main, master]
 
 jobs:
   validate:
@@ -22,6 +22,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check formatting
+        run: npm run format:check
+
       - name: Run ESLint
         run: npm run lint
 
@@ -37,3 +40,45 @@ jobs:
         with:
           file: ./coverage/lcov.info
           fail_ci_if_error: false
+
+  database:
+    name: Database reveal & save regressions
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: audit-test
+          POSTGRES_DB: lovecapsule_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      LOVE_CAPSULE_TEST_DB: postgresql://postgres:audit-test@localhost:5432/lovecapsule_test_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Run actual Postgres/RLS regressions
+        run: python3 scripts/test_database.py
+      - name: Check generated database contract
+        run: python3 scripts/generate_database_types.py --check
+
+  edge:
+    name: Edge Function types and worker regressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno fmt --check supabase/functions
+      - run: deno check supabase/functions/check-anniversary/index.ts supabase/functions/maintenance/index.ts supabase/functions/notify-partner/index.ts
+      - run: deno test supabase/functions/maintenance/tests

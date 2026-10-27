@@ -20,21 +20,32 @@ export async function uploadMedia(
   userId: string,
   entryId: string,
   fileName: string,
-  mimeType: string
+  mimeType: string,
+  retrySafe = false
 ): Promise<string> {
   const storagePath = `${userId}/${entryId}/${fileName}`;
 
   const file = new File(localUri);
   if (!file.exists) throw new Error('File does not exist');
 
+  if (file.size > 25 * 1024 * 1024) throw new Error('Choose an attachment smaller than 25 MiB.');
   const bytes = await file.bytes();
 
   const { error } = await supabase.storage.from(BUCKET).upload(storagePath, bytes, {
     contentType: mimeType,
-    upsert: true,
+    upsert: !retrySafe,
   });
 
-  if (error) throw error;
+  // A retry uses the same UUID path and immutable local file. An upload may
+  // have succeeded even when its response was lost. It never overwrites a blob.
+  const duplicate =
+    error &&
+    (['ResourceAlreadyExists', 'KeyAlreadyExists', 'Duplicate', 'already_exists'].includes(
+      (error as { code?: string; error?: string }).code ?? (error as { error?: string }).error ?? ''
+    ) ||
+      (['400', '409'].includes(String(error.statusCode)) &&
+        ['The resource already exists', 'Asset already exists'].includes(error.message)));
+  if (error && !(retrySafe && duplicate)) throw error;
 
   return storagePath;
 }

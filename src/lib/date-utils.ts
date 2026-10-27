@@ -1,8 +1,8 @@
 import {
   differenceInDays,
+  differenceInCalendarDays,
   format,
   getDate,
-  setYear,
   isAfter,
   isBefore,
   isSameDay,
@@ -20,23 +20,30 @@ export function getDaysUntilAnniversary(anniversaryDate: string): number {
   const anniversary = parseISO(anniversaryDate);
 
   // Set anniversary to current year
-  let nextAnniversary = setYear(anniversary, getYear(today));
+  const year = Math.max(getYear(today), getYear(anniversary));
+  let nextAnniversary = new Date(year, anniversary.getMonth(), anniversary.getDate());
 
   // If it already passed this year, use next year
   if (isBefore(nextAnniversary, today) && !isSameDay(nextAnniversary, today)) {
-    nextAnniversary = setYear(anniversary, getYear(today) + 1);
+    nextAnniversary = new Date(year + 1, anniversary.getMonth(), anniversary.getDate());
   }
 
-  return differenceInDays(nextAnniversary, today);
+  return differenceInCalendarDays(nextAnniversary, today);
 }
 
+/** Legacy date-only display helper. Reveal authorization uses get_reveal_overview. */
 export function isAnniversaryReady(
   anniversaryDate: string,
   lastRevealYear: number | null
 ): boolean {
   const today = new Date();
   const anniversary = parseISO(anniversaryDate);
-  const anniversaryThisYear = setYear(anniversary, getYear(today));
+  const anniversaryThisYear = new Date(
+    getYear(today),
+    anniversary.getMonth(),
+    anniversary.getDate()
+  );
+  if (getYear(anniversary) > getYear(today)) return false;
   const currentYear = getYear(today);
 
   return (
@@ -102,7 +109,7 @@ export function formatCheckpointFrequency(
 }
 
 export function formatCheckpointDescription(config: CheckpointConfig): string {
-  const { frequency, day_of_month, months, specific_date, label } = config;
+  const { frequency, day_of_month, specific_date, label } = config;
 
   if (label) return label;
 
@@ -126,13 +133,12 @@ function getOrdinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
+/** Legacy date-only display helper. New screens use server occurrence instants. */
 export function getNextCheckpointDate(configs: CheckpointConfig[]): Date | null {
   if (configs.length === 0) return null;
 
   const today = new Date();
   const currentYear = getYear(today);
-  const currentMonth = today.getMonth() + 1; // 1-12
-  const currentDay = today.getDate();
 
   let nextDate: Date | null = null;
 
@@ -172,12 +178,8 @@ export function getNextCheckpointDate(configs: CheckpointConfig[]): Date | null 
       case 'specific_date':
         if (config.specific_date) {
           const date = parseISO(config.specific_date);
-          // Set to current year
-          let thisYearDate = setYear(date, currentYear);
-          if (isBefore(thisYearDate, today) && !isSameDay(thisYearDate, today)) {
-            thisYearDate = setYear(date, currentYear + 1);
-          }
-          candidateDates.push(thisYearDate);
+          // A one-off never becomes a yearly recurrence after it is missed.
+          candidateDates.push(config.scheduled_at ? parseISO(config.scheduled_at) : date);
         }
         break;
     }
@@ -198,7 +200,8 @@ export function formatNextCheckpointDate(date: Date | null): string {
   const today = new Date();
   if (isSameDay(date, today)) return 'Today';
 
-  const days = differenceInDays(date, today);
+  const days = differenceInCalendarDays(date, today);
+  if (days < 0) return 'Ready to open';
   if (days === 1) return 'Tomorrow';
   if (days < 7) return `In ${days} days`;
 

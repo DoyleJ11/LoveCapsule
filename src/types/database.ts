@@ -3,6 +3,7 @@ export interface Profile {
   display_name: string;
   avatar_url: string | null;
   expo_push_token: string | null;
+  notifications_enabled?: boolean;
   /** Unlocks the in-app dev tools. Only settable from the Supabase dashboard. */
   is_admin: boolean;
   created_at: string;
@@ -18,6 +19,9 @@ export interface Couple {
   is_revealed: boolean;
   last_reveal_year: number | null;
   valentine_surprise_triggered: boolean;
+  reveal_timezone: string;
+  reveal_time: string;
+  schedule_version: number;
   created_at: string;
   updated_at: string;
 }
@@ -71,6 +75,12 @@ export interface CheckpointConfig {
   label: string | null;
   is_active: boolean;
   created_at: string;
+  timezone?: string;
+  reveal_time?: string;
+  scheduled_at?: string | null;
+  starts_on?: string;
+  version?: number;
+  schedule_error?: string | null;
 }
 
 export interface CheckpointReveal {
@@ -132,6 +142,8 @@ export interface RevealStats {
   partner_2_words: number;
   total_media_images: number;
   total_media_videos: number;
+  total_media_audio?: number;
+  total_audio_duration_ms?: number;
   partner_1_avg_hour: number;
   partner_2_avg_hour: number;
   most_active_month: string;
@@ -156,3 +168,63 @@ export interface RevealStats {
   }[];
   unique_location_count: number;
 }
+
+export interface AnnualEvent {
+  id: string;
+  couple_id: string;
+  reveal_year: number;
+  revealed_at: string;
+  ready_at: string;
+  timezone: string;
+  legacy: boolean;
+  stats_snapshot: RevealStats;
+  entries: EntrySummary[];
+}
+export interface RevealOccurrence {
+  id: string;
+  config_id: string | null;
+  due_at: string;
+  timezone: string;
+  label: string | null;
+}
+export interface RevealOverview {
+  couple_id: string;
+  server_now: string;
+  schedule_version: number;
+  annual: { year: number; ready_at: string; is_ready: boolean; timezone: string } | null;
+  annual_history: {
+    id: string;
+    year: number;
+    opened_at: string;
+    ready_at: string;
+    timezone: string;
+    legacy: boolean;
+  }[];
+  checkpoints: RevealOccurrence[];
+  checkpoint_history: {
+    id: string;
+    occurrence_id: string | null;
+    label: string | null;
+    due_at: string;
+    timezone: string;
+    opened_at: string;
+    entry_id: string | null;
+  }[];
+}
+
+export type EntrySummary = Pick<
+  Entry,
+  | 'id'
+  | 'couple_id'
+  | 'author_id'
+  | 'title'
+  | 'content_plain'
+  | 'word_count'
+  | 'mood'
+  | 'is_draft'
+  | 'is_favorite'
+  | 'entry_date'
+  | 'location_name'
+  | 'created_at'
+  | 'updated_at'
+>;
