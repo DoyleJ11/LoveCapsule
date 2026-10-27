@@ -13,15 +13,13 @@ import {
   Platform,
   useColorScheme,
   ActionSheetIOS,
-  Modal,
   ActivityIndicator,
-  FlatList,
   AppState,
 } from 'react-native';
 import { useRouter, useNavigation, useLocalSearchParams } from 'expo-router';
 import { usePreventRemove } from '@react-navigation/native';
 import { uuid } from 'expo-modules-core';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { encryptedStorage } from '../../../src/lib/secure-storage';
 import { format } from 'date-fns';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
@@ -41,7 +39,7 @@ import type { Media } from '../../../src/types/database';
 import { useVoiceMemo } from '../../../src/hooks/useVoiceMemo';
 import { getCurrentDateString, formatEntryDate, formatDuration } from '../../../src/lib/date-utils';
 import { compressImage } from '../../../src/lib/storage';
-import { searchLocations, type LocationResult } from '../../../src/lib/location-search';
+import { LocationSheet } from '../../../src/features/entries/LocationSheet';
 import {
   Colors,
   Spacing,
@@ -112,16 +110,11 @@ function EntryEditor() {
   );
   const voiceMemo = useVoiceMemo((uri, ms) => recordingSaved.current(uri, ms));
   const key = user && couple ? draftKey(user.id, couple.id, entryId) : null;
-  const store = useMemo(() => (key ? createDraftStore(AsyncStorage, key) : null), [key]);
+  const store = useMemo(() => (key ? createDraftStore(encryptedStorage, key) : null), [key]);
   const [allowExit, setAllowExit] = useState(false);
   const exitAction = useRef<(() => void) | null>(null);
   const [locationSearchVisible, setLocationSearchVisible] = useState(false);
-  const [locationQuery, setLocationQuery] = useState('');
-  const [locationSearching, setLocationSearching] = useState(false);
-  const [locationResults, setLocationResults] = useState<LocationResult[]>([]);
   const scrollViewRef = useRef<ScrollView>(null);
-  const locationSearchRef = useRef<TextInput>(null);
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const navigateAway = useCallback(() => {
     const state = navigation.getState();
@@ -524,66 +517,7 @@ function EntryEditor() {
     }
   };
 
-  const handleAddLocation = () => {
-    setLocationQuery('');
-    setLocationResults([]);
-    setLocationSearchVisible(true);
-  };
-
-  const handleLocationQueryChange = (text: string) => {
-    setLocationQuery(text);
-
-    // Debounced autocomplete search
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    if (!text.trim()) {
-      setLocationResults([]);
-      return;
-    }
-    searchDebounceRef.current = setTimeout(async () => {
-      setLocationSearching(true);
-      try {
-        const results = await searchLocations(text.trim());
-        setLocationResults(results);
-      } catch {
-        // Silently fail for autocomplete
-      } finally {
-        setLocationSearching(false);
-      }
-    }, 400);
-  };
-
-  const handleLocationSearch = async () => {
-    const query = locationQuery.trim();
-    if (!query) return;
-
-    setLocationSearching(true);
-    try {
-      const results = await searchLocations(query);
-      if (results.length === 0) {
-        setLocationResults([]);
-        Alert.alert(
-          'Not Found',
-          'No locations found for that search. Try a different name or address.'
-        );
-        return;
-      }
-      setLocationResults(results);
-    } catch {
-      Alert.alert('Error', 'Could not search for location');
-    } finally {
-      setLocationSearching(false);
-    }
-  };
-
-  const handleSelectLocation = (loc: LocationResult) => {
-    // Store a concise display name — avoid duplicating the name in the address
-    const address = loc.address || '';
-    const nameIsInAddress = address.toLowerCase().includes(loc.name.toLowerCase());
-    setLocationName(nameIsInAddress ? loc.name : loc.name);
-    setLocationLat(loc.lat);
-    setLocationLng(loc.lng);
-    setLocationSearchVisible(false);
-  };
+  const handleAddLocation = () => setLocationSearchVisible(true);
 
   const handleAddImage = async () => {
     if (Platform.OS === 'ios') {
@@ -601,7 +535,11 @@ function EntryEditor() {
         }
       );
     } else {
-      await pickImage('library');
+      Alert.alert('Add photo', 'Choose a source', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Camera', onPress: () => void pickImage('camera') },
+        { text: 'Photo library', onPress: () => void pickImage('library') },
+      ]);
     }
   };
 
@@ -1030,103 +968,16 @@ function EntryEditor() {
       </View>
 
       {/* Location Search Modal */}
-      <Modal
+      <LocationSheet
         visible={locationSearchVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setLocationSearchVisible(false)}
-      >
-        <View style={[styles.locationModal, { backgroundColor: colors.background }]}>
-          <View style={[styles.locationModalHeader, { borderBottomColor: colors.border }]}>
-            <TouchableOpacity onPress={() => setLocationSearchVisible(false)}>
-              <Text style={{ color: colors.primary, fontSize: FontSize.md }}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={[styles.locationModalTitle, { color: colors.text }]}>Add Location</Text>
-            <View style={{ width: 50 }} />
-          </View>
-
-          <View style={styles.locationSearchRow}>
-            <TextInput
-              ref={locationSearchRef}
-              style={[
-                styles.locationSearchInput,
-                {
-                  color: colors.text,
-                  backgroundColor: colors.surfaceSecondary,
-                  borderColor: colors.border,
-                },
-              ]}
-              placeholder="Search for a place or address..."
-              placeholderTextColor={colors.textMuted}
-              value={locationQuery}
-              onChangeText={handleLocationQueryChange}
-              onSubmitEditing={handleLocationSearch}
-              returnKeyType="search"
-              autoFocus
-            />
-            <TouchableOpacity
-              style={[styles.locationSearchButton, { backgroundColor: colors.primary }]}
-              onPress={handleLocationSearch}
-              disabled={locationSearching || !locationQuery.trim()}
-            >
-              {locationSearching ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <FontAwesome name="search" size={16} color="#fff" />
-              )}
-            </TouchableOpacity>
-          </View>
-
-          <Text style={[styles.locationSearchHint, { color: colors.textMuted }]}>
-            Search for the location of your date, event, or memory
-          </Text>
-
-          <FlatList
-            data={locationResults}
-            keyExtractor={(_, i) => i.toString()}
-            contentContainerStyle={{ padding: Spacing.md }}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[
-                  styles.locationResultItem,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                ]}
-                onPress={() => handleSelectLocation(item)}
-              >
-                <FontAwesome
-                  name="map-marker"
-                  size={16}
-                  color={colors.primary}
-                  style={{ marginTop: 2 }}
-                />
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[styles.locationResultText, { color: colors.text }]}
-                    numberOfLines={1}
-                  >
-                    {item.name}
-                  </Text>
-                  {item.address ? (
-                    <Text
-                      style={[styles.locationResultAddress, { color: colors.textMuted }]}
-                      numberOfLines={1}
-                    >
-                      {item.address}
-                    </Text>
-                  ) : null}
-                </View>
-              </TouchableOpacity>
-            )}
-            ListEmptyComponent={
-              locationQuery.trim() && !locationSearching ? (
-                <Text style={[styles.locationEmptyText, { color: colors.textMuted }]}>
-                  No results found. Try a different search.
-                </Text>
-              ) : null
-            }
-          />
-        </View>
-      </Modal>
+        onClose={() => setLocationSearchVisible(false)}
+        onSelect={(name, lat, lng) => {
+          setLocationName(name);
+          setLocationLat(lat);
+          setLocationLng(lng);
+          setLocationSearchVisible(false);
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -1294,66 +1145,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: FontSize.sm,
     fontWeight: '600',
-  },
-  // Location search modal styles
-  locationModal: {
-    flex: 1,
-  },
-  locationModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: Spacing.md,
-    borderBottomWidth: 1,
-  },
-  locationModalTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: '600',
-  },
-  locationSearchRow: {
-    flexDirection: 'row',
-    padding: Spacing.md,
-    gap: Spacing.sm,
-  },
-  locationSearchInput: {
-    flex: 1,
-    height: 44,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    paddingHorizontal: Spacing.md,
-    fontSize: FontSize.md,
-  },
-  locationSearchButton: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.sm,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  locationSearchHint: {
-    fontSize: FontSize.xs,
-    paddingHorizontal: Spacing.md,
-    marginBottom: Spacing.sm,
-  },
-  locationResultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    padding: Spacing.md,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    marginBottom: Spacing.sm,
-  },
-  locationResultText: {
-    fontSize: FontSize.md,
-  },
-  locationResultAddress: {
-    fontSize: FontSize.xs,
-    marginTop: 2,
-  },
-  locationEmptyText: {
-    textAlign: 'center',
-    marginTop: Spacing.lg,
-    fontSize: FontSize.sm,
   },
 });

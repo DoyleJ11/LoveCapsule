@@ -1,4 +1,5 @@
 import { uploadMedia } from '../storage';
+import { File } from 'expo-file-system';
 import { supabase } from '../supabase';
 jest.mock('expo-file-system', () => ({
   File: jest.fn(() => ({ exists: true, bytes: async () => new Uint8Array([1]) })),
@@ -29,4 +30,17 @@ it.each([
   await expect(
     uploadMedia('local', 'user', 'entry', 'stable.jpg', 'image/jpeg', true)
   ).rejects.toEqual(error);
+});
+
+it('rejects oversized files before reading bytes or uploading', async () => {
+  const bytes = jest.fn();
+  (File as unknown as jest.Mock).mockImplementationOnce(() => ({
+    exists: true,
+    size: 25 * 1024 * 1024 + 1,
+    bytes,
+  }));
+  await expect(uploadMedia('large', 'user', 'entry', 'large.m4a', 'audio/m4a')).rejects.toThrow(
+    '25 MiB'
+  );
+  expect(bytes).not.toHaveBeenCalled();
 });

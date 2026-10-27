@@ -14,11 +14,11 @@ it('does not restore old diary data when a request completes after an account sw
         })
     )
     .mockResolvedValue({ data: [{ id: 'new-note' }], error: null });
-  (supabase.from as jest.Mock).mockReturnValue({
-    select: jest.fn().mockReturnThis(),
-    eq: jest.fn().mockReturnThis(),
-    order,
-  });
+  (supabase.rpc as jest.Mock).mockImplementation((name) =>
+    name === 'diary_summary'
+      ? Promise.resolve({ data: { entries: 1, words: 2 }, error: null })
+      : order()
+  );
   const hook = renderHook(({ couple }: { couple: string }) => useEntries(couple), {
     initialProps: { couple: 'old' },
   });

@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: ios-production-release
+  cancel-in-progress: false
+
 jobs:
   build-and-submit:
     name: Build & Submit to TestFlight
@@ -13,6 +17,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release tag and main ancestry
+        run: node scripts/check-release.cjs
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -32,8 +41,5 @@ jobs:
       - name: Run validation
         run: npm run validate
 
-      - name: Build for production
-        run: eas build --platform ios --profile production --non-interactive
-
-      - name: Submit to TestFlight
-        run: eas submit --platform ios --latest --non-interactive
+      - name: Build and submit this exact build to TestFlight
+        run: eas build --platform ios --profile production --auto-submit --non-interactive

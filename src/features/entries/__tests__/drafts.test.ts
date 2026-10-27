@@ -1,4 +1,4 @@
-import { createDraftStore, draftKey, type EntryDraft } from '../drafts';
+import { createDraftStore, clearLocalDrafts, draftKey, type EntryDraft } from '../drafts';
 const draft = {
   version: 1,
   userId: 'a',
@@ -53,4 +53,18 @@ it('surfaces persistence errors and permits a later retry', async () => {
   await expect(store.save(draft)).rejects.toThrow('full');
   await store.save(draft);
   expect(await store.load('a', 'couple')).toEqual(draft);
+});
+
+it('removes the deleted couple drafts, preserves another couple, and rejects late autosaves', async () => {
+  const disk = storage();
+  const own = { ...draft, userId: 'delete-user', coupleId: 'deleted' };
+  const other = { ...own, coupleId: 'kept' };
+  const store = createDraftStore(disk, draftKey(own.userId, own.coupleId));
+  const keep = createDraftStore(disk, draftKey(other.userId, other.coupleId));
+  await store.save(own);
+  await keep.save(other);
+  await clearLocalDrafts(disk, own.userId, own.coupleId);
+  expect(await store.load(own.userId, own.coupleId)).toBeNull();
+  expect(await keep.load(other.userId, other.coupleId)).toEqual(other);
+  await expect(store.save(own)).rejects.toThrow('deleted');
 });

@@ -4,7 +4,7 @@ import { uploadMedia, deleteMedia } from '../../lib/storage';
 import { saveWithAttachments, type SavePlan, type SaveReceipt } from './save-workflow';
 import type { Entry } from '../../types/database';
 
-export async function loadEditableEntry(id: string, userId: string, coupleId: string) {
+export async function loadOwnEntry(id: string, userId: string, coupleId: string) {
   const { data, error } = await supabase
     .from('entries')
     .select('*')
@@ -14,13 +14,17 @@ export async function loadEditableEntry(id: string, userId: string, coupleId: st
     .single();
   if (error) throw error;
   if (!data) throw new Error('Entry could not be loaded. Retry before editing.');
+  return data as Entry;
+}
+export async function loadEditableEntry(id: string, userId: string, coupleId: string) {
+  const entry = await loadOwnEntry(id, userId, coupleId);
   const { data: media, error: mediaError } = await supabase
     .from('media')
     .select('*')
     .eq('entry_id', id)
     .order('created_at', { ascending: true });
   if (mediaError) throw mediaError;
-  return { entry: data as Entry, media: media ?? [] };
+  return { entry, media: media ?? [] };
 }
 
 export async function saveEntry(
@@ -38,7 +42,7 @@ export async function saveEntry(
         .eq('entry_id', request.entryId)
         .maybeSingle();
       if (error) throw error;
-      return (data?.result as SaveReceipt) ?? null;
+      return (data?.result as unknown as SaveReceipt) ?? null;
     },
     upload: async (attachment, entryId) => {
       const suffix = attachment.media_type === 'image' ? 'jpg' : 'm4a';
@@ -66,8 +70,8 @@ export async function saveEntry(
         p_operation_id: request.operationId,
         p_entry_id: request.entryId,
         p_expected_updated_at: request.expectedUpdatedAt,
-        p_entry: request.fields,
-        p_media: media,
+        p_entry: { ...request.fields },
+        p_media: JSON.parse(JSON.stringify(media)),
         p_remove_media: request.removeMediaIds,
       });
       if (error) throw error;

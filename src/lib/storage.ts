@@ -28,6 +28,7 @@ export async function uploadMedia(
   const file = new File(localUri);
   if (!file.exists) throw new Error('File does not exist');
 
+  if (file.size > 25 * 1024 * 1024) throw new Error('Choose an attachment smaller than 25 MiB.');
   const bytes = await file.bytes();
 
   const { error } = await supabase.storage.from(BUCKET).upload(storagePath, bytes, {

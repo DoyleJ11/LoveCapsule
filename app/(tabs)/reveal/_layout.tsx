@@ -13,7 +13,7 @@ export default function RevealLayout() {
         headerTintColor: colors.text,
       }}
     >
-      <Stack.Screen name="index" options={{ title: 'TimeCapsule Reveal', headerShown: false }} />
+      <Stack.Screen name="index" options={{ title: 'LoveCapsule Reveal', headerShown: false }} />
     </Stack>
   );
 }

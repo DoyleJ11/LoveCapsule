@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { AppState } from 'react-native';
 import { errorMessage } from '../lib/errors';
+import { requestDeletion } from '../features/account/deletion';
 import { supabase } from '../lib/supabase';
 import { getSignedUrl } from '../lib/storage';
 import { useAuth } from './AuthProvider';
@@ -195,6 +196,17 @@ export function CoupleProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timer);
   }, [overview, serverNow, fetchCouple]);
 
+  const [avatarRevision, renewAvatars] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => renewAvatars((v) => v + 1), 50 * 60 * 1000);
+    const listener = AppState.addEventListener('change', (s) => {
+      if (s === 'active') renewAvatars((v) => v + 1);
+    });
+    return () => {
+      clearInterval(timer);
+      listener.remove();
+    };
+  }, []);
   // Preload avatar signed URLs so they're ready before navigating to Settings
   useEffect(() => {
     let active = true;
@@ -211,7 +223,7 @@ export function CoupleProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, [profile?.avatar_url, profile?.id, user?.id]);
+  }, [profile?.avatar_url, profile?.id, user?.id, avatarRevision]);
 
   useEffect(() => {
     let active = true;
@@ -228,7 +240,7 @@ export function CoupleProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, [partner?.avatar_url, user?.id]);
+  }, [partner?.avatar_url, user?.id, avatarRevision]);
 
   // Allow Settings to update the profile avatar URL after uploading a new photo
   const refreshProfileAvatar = useCallback(async (storagePath: string) => {
@@ -294,31 +306,7 @@ export function CoupleProvider({ children }: { children: React.ReactNode }) {
     if (!couple) throw new Error('No couple to unpair');
     if (!user) throw new Error('Not authenticated');
 
-    // Step 1: Get all entries for this couple to find media paths
-    const { data: entries } = await supabase
-      .from('entries')
-      .select('id')
-      .eq('couple_id', couple.id);
-
-    // Step 2: Delete media files from Supabase Storage
-    if (entries && entries.length > 0) {
-      const entryIds = entries.map((e) => e.id);
-      const { data: mediaFiles } = await supabase
-        .from('media')
-        .select('storage_path, author_id')
-        .in('entry_id', entryIds);
-
-      if (mediaFiles && mediaFiles.length > 0) {
-        // Delete storage files (each user's files are in their folder)
-        const filePaths = mediaFiles.map((m) => `${m.author_id}/${m.storage_path}`);
-        await supabase.storage.from('entry-media').remove(filePaths);
-      }
-    }
-
-    // Step 3: Delete the couple (cascades to entries, media rows, reveal_history)
-    const { error: deleteError } = await supabase.from('couples').delete().eq('id', couple.id);
-
-    if (deleteError) throw deleteError;
+    await requestDeletion('unpair', couple.id);
 
     // Step 4: Clear local state
     request.current++;

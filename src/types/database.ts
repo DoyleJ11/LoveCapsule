@@ -3,6 +3,7 @@ export interface Profile {
   display_name: string;
   avatar_url: string | null;
   expo_push_token: string | null;
+  notifications_enabled?: boolean;
   /** Unlocks the in-app dev tools. Only settable from the Supabase dashboard. */
   is_admin: boolean;
   created_at: string;
@@ -141,6 +142,8 @@ export interface RevealStats {
   partner_2_words: number;
   total_media_images: number;
   total_media_videos: number;
+  total_media_audio?: number;
+  total_audio_duration_ms?: number;
   partner_1_avg_hour: number;
   partner_2_avg_hour: number;
   most_active_month: string;
@@ -175,7 +178,7 @@ export interface AnnualEvent {
   timezone: string;
   legacy: boolean;
   stats_snapshot: RevealStats;
-  entries: Entry[];
+  entries: EntrySummary[];
 }
 export interface RevealOccurrence {
   id: string;
@@ -208,3 +211,20 @@ export interface RevealOverview {
     entry_id: string | null;
   }[];
 }
+
+export type EntrySummary = Pick<
+  Entry,
+  | 'id'
+  | 'couple_id'
+  | 'author_id'
+  | 'title'
+  | 'content_plain'
+  | 'word_count'
+  | 'mood'
+  | 'is_draft'
+  | 'is_favorite'
+  | 'entry_date'
+  | 'location_name'
+  | 'created_at'
+  | 'updated_at'
+>;

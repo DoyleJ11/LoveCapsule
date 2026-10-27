@@ -1,3 +1,4 @@
+import { errorMessage } from '../../src/lib/errors';
 import { useState } from 'react';
 import {
   View,
@@ -11,6 +12,8 @@ import {
   useColorScheme,
 } from 'react-native';
 import { Link } from 'expo-router';
+import { supabase } from '../../src/lib/supabase';
+import { AUTH_CALLBACK } from '../../src/features/account/links';
 import { signIn } from '../../src/lib/auth';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../src/constants/theme';
 
@@ -30,8 +33,8 @@ export default function SignInScreen() {
     setLoading(true);
     try {
       await signIn(email.trim(), password);
-    } catch (e: any) {
-      Alert.alert('Sign In Failed', e.message);
+    } catch (e: unknown) {
+      Alert.alert('Sign In Failed', errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -43,7 +46,7 @@ export default function SignInScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.content}>
-        <Text style={[styles.title, { color: colors.text }]}>TimeCapsule</Text>
+        <Text style={[styles.title, { color: colors.text }]}>LoveCapsule</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
           Write secret diary entries for your partner to read on your anniversary
         </Text>
@@ -84,13 +87,31 @@ export default function SignInScreen() {
           />
 
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Reset password"
+            onPress={async () => {
+              if (!email.trim()) {
+                Alert.alert('Password reset', 'Enter your email address first.');
+                return;
+              }
+              const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+                redirectTo: AUTH_CALLBACK,
+              });
+              Alert.alert(
+                error ? 'Could not send reset link' : 'Check your email',
+                error?.message ??
+                  'If this address has an account, a password reset link will arrive.'
+              );
+            }}
+          >
+            <Text style={{ color: colors.primary }}>Forgot password?</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[styles.button, { backgroundColor: colors.primary }]}
             onPress={handleSignIn}
             disabled={loading}
           >
-            <Text style={styles.buttonText}>
-              {loading ? 'Signing in...' : 'Sign In'}
-            </Text>
+            <Text style={styles.buttonText}>{loading ? 'Signing in...' : 'Sign In'}</Text>
           </TouchableOpacity>
 
           <Link href="/(auth)/sign-up" asChild>

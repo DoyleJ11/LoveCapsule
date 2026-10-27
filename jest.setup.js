@@ -22,6 +22,10 @@ jest.mock('expo-constants', () => ({
 // Mock expo-notifications
 jest.mock('expo-notifications', () => ({
   setNotificationHandler: jest.fn(),
+  getLastNotificationResponseAsync: jest.fn(async () => null),
+  addPushTokenListener: jest.fn(() => ({ remove: jest.fn() })),
+  setNotificationChannelAsync: jest.fn(),
+  AndroidImportance: { DEFAULT: 3 },
   addNotificationReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
   addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
   getPermissionsAsync: jest.fn(() => Promise.resolve({ status: 'granted' })),

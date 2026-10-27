@@ -7,10 +7,11 @@ import {
   Dimensions,
   SafeAreaView,
   useColorScheme,
+  ScrollView,
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import Animated, { FadeIn, FadeInDown, FadeInUp } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeInUp, ReduceMotion } from 'react-native-reanimated';
 import MapView, { Marker } from 'react-native-maps';
 import { Colors, Spacing, FontSize, BorderRadius, Moods } from '../../constants/theme';
 import { formatShortDate, formatEntryDate } from '../../lib/date-utils';
@@ -48,12 +49,14 @@ function StatSlide({
   bgColor,
 }: {
   children: React.ReactNode;
-  colors: any;
+  colors: (typeof Colors)['light'];
   bgColor?: string;
 }) {
   return (
     <View style={[styles.slide, { backgroundColor: bgColor || colors.background }]}>
-      <SafeAreaView style={styles.slideContent}>{children}</SafeAreaView>
+      <SafeAreaView style={styles.slide}>
+        <ScrollView contentContainerStyle={styles.slideContent}>{children}</ScrollView>
+      </SafeAreaView>
     </View>
   );
 }
@@ -73,7 +76,7 @@ function BarComparison({
   value2: number;
   color1: string;
   color2: string;
-  colors: any;
+  colors: (typeof Colors)['light'];
 }) {
   const maxVal = Math.max(value1, value2, 1);
   const winner1 = value1 > value2;
@@ -82,7 +85,7 @@ function BarComparison({
   return (
     <View style={styles.barContainer}>
       {/* Row 1 */}
-      <Animated.View entering={FadeInDown.delay(300)}>
+      <Animated.View entering={FadeInDown.delay(300).reduceMotion(ReduceMotion.System)}>
         <View style={styles.barLabelRow}>
           <Text style={[styles.barLabel, { color: colors.text }]} numberOfLines={1}>
             {label1}
@@ -94,13 +97,13 @@ function BarComparison({
         </View>
         <View style={styles.barTrack}>
           <Animated.View
-            entering={FadeIn.delay(500)}
+            entering={FadeIn.delay(500).reduceMotion(ReduceMotion.System)}
             style={[styles.bar, { width: `${(value1 / maxVal) * 100}%`, backgroundColor: color1 }]}
           />
         </View>
       </Animated.View>
       {/* Row 2 */}
-      <Animated.View entering={FadeInDown.delay(500)}>
+      <Animated.View entering={FadeInDown.delay(500).reduceMotion(ReduceMotion.System)}>
         <View style={styles.barLabelRow}>
           <Text style={[styles.barLabel, { color: colors.text }]} numberOfLines={1}>
             {label2}
@@ -112,7 +115,7 @@ function BarComparison({
         </View>
         <View style={styles.barTrack}>
           <Animated.View
-            entering={FadeIn.delay(700)}
+            entering={FadeIn.delay(700).reduceMotion(ReduceMotion.System)}
             style={[styles.bar, { width: `${(value2 / maxVal) * 100}%`, backgroundColor: color2 }]}
           />
         </View>
@@ -155,17 +158,20 @@ export function AnnualRecap({
       {/* Slide 1: Total Entries */}
       <View key="1">
         <StatSlide colors={colors}>
-          <Animated.Text entering={FadeInDown.delay(200)} style={[styles.statEmoji]}>
+          <Animated.Text
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
+            style={[styles.statEmoji]}
+          >
             📝
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(400)}
+            entering={FadeInDown.delay(400).reduceMotion(ReduceMotion.System)}
             style={[styles.statBigNumber, { color: colors.primary }]}
           >
             {totalEntries}
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(600)}
+            entering={FadeInDown.delay(600).reduceMotion(ReduceMotion.System)}
             style={[styles.statCaption, { color: colors.text }]}
           >
             Together, you captured{'\n'}
@@ -196,21 +202,27 @@ export function AnnualRecap({
       {/* Slide 3: Total Words */}
       <View key="3">
         <StatSlide colors={colors}>
-          <Animated.Text entering={FadeInDown.delay(200)} style={styles.statEmoji}>
+          <Animated.Text
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
+            style={styles.statEmoji}
+          >
             💬
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(400)}
+            entering={FadeInDown.delay(400).reduceMotion(ReduceMotion.System)}
             style={[styles.statBigNumber, { color: colors.primary }]}
           >
             {totalWords.toLocaleString()}
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(600)}
+            entering={FadeInDown.delay(600).reduceMotion(ReduceMotion.System)}
             style={[styles.statCaption, { color: colors.text }]}
           >
-            words of love — that's longer than{'\n'}
-            {bookComparison}
+            {totalWords >= 500
+              ? `words of love — that's longer than ${bookComparison}`
+              : totalWords
+                ? 'words of love, saved together'
+                : 'Your next chapter is waiting to be written'}
           </Animated.Text>
         </StatSlide>
       </View>
@@ -236,23 +248,28 @@ export function AnnualRecap({
       {/* Slide 5: Night Owl vs Early Bird */}
       <View key="5">
         <StatSlide colors={colors}>
-          <Animated.Text entering={FadeInDown.delay(200)} style={styles.statEmoji}>
+          <Animated.Text
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
+            style={styles.statEmoji}
+          >
             {Math.round(stats.partner_1_avg_hour) >= 18 ? '🌙' : '☀️'}
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(400)}
+            entering={FadeInDown.delay(400).reduceMotion(ReduceMotion.System)}
             style={[styles.slideTitle, { color: colors.text }]}
           >
             Night Owl vs Early Bird
           </Animated.Text>
-          <Animated.View entering={FadeInDown.delay(600)}>
+          <Animated.View entering={FadeInDown.delay(600).reduceMotion(ReduceMotion.System)}>
             <Text style={[styles.timeText, { color: colors.partner1 }]}>
-              {stats.partner_1_name} mostly wrote{' '}
-              {getTimeLabel(Math.round(stats.partner_1_avg_hour))}
+              {stats.partner_1_entries
+                ? `${stats.partner_1_name} mostly wrote ${getTimeLabel(Math.round(stats.partner_1_avg_hour))}`
+                : `${stats.partner_1_name} has no writing times yet`}
             </Text>
             <Text style={[styles.timeText, { color: colors.partner2 }]}>
-              {stats.partner_2_name} mostly wrote{' '}
-              {getTimeLabel(Math.round(stats.partner_2_avg_hour))}
+              {stats.partner_2_entries
+                ? `${stats.partner_2_name} mostly wrote ${getTimeLabel(Math.round(stats.partner_2_avg_hour))}`
+                : `${stats.partner_2_name} has no writing times yet`}
             </Text>
           </Animated.View>
         </StatSlide>
@@ -261,23 +278,26 @@ export function AnnualRecap({
       {/* Slide 6: Most Active Month */}
       <View key="6">
         <StatSlide colors={colors}>
-          <Animated.Text entering={FadeInDown.delay(200)} style={styles.statEmoji}>
+          <Animated.Text
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
+            style={styles.statEmoji}
+          >
             📅
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(400)}
+            entering={FadeInDown.delay(400).reduceMotion(ReduceMotion.System)}
             style={[styles.statCaption, { color: colors.text }]}
           >
             Your love peaked in
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(600)}
+            entering={FadeInDown.delay(600).reduceMotion(ReduceMotion.System)}
             style={[styles.statBigText, { color: colors.primary }]}
           >
-            {stats.most_active_month?.trim()}
+            {stats.most_active_month?.trim() || 'No writing month yet'}
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(800)}
+            entering={FadeInDown.delay(800).reduceMotion(ReduceMotion.System)}
             style={[styles.statSubCaption, { color: colors.textSecondary }]}
           >
             with {stats.most_active_month_count} entries
@@ -288,35 +308,37 @@ export function AnnualRecap({
       {/* Slide 7: Longest Entry */}
       <View key="7">
         <StatSlide colors={colors}>
-          <Animated.Text entering={FadeInDown.delay(200)} style={styles.statEmoji}>
+          <Animated.Text
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
+            style={styles.statEmoji}
+          >
             📜
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(400)}
+            entering={FadeInDown.delay(400).reduceMotion(ReduceMotion.System)}
             style={[styles.slideTitle, { color: colors.text }]}
           >
             Longest Love Letter
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(600)}
+            entering={FadeInDown.delay(600).reduceMotion(ReduceMotion.System)}
             style={[styles.statBigNumber, { color: colors.primary }]}
           >
             {stats.longest_entry_words.toLocaleString()}
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(700)}
+            entering={FadeInDown.delay(700).reduceMotion(ReduceMotion.System)}
             style={[styles.statCaption, { color: colors.text }]}
           >
             words on {stats.longest_entry_date ? formatShortDate(stats.longest_entry_date) : ''}
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(800)}
+            entering={FadeInDown.delay(800).reduceMotion(ReduceMotion.System)}
             style={[styles.statSubCaption, { color: colors.textSecondary }]}
           >
-            Written by{' '}
-            {stats.longest_entry_author_id === stats.partner_1_id
-              ? stats.partner_1_name
-              : stats.partner_2_name}
+            {!stats.longest_entry_author_id
+              ? 'No notes in this capsule yet'
+              : `Written by ${stats.longest_entry_author_id === stats.partner_1_id ? stats.partner_1_name : stats.partner_2_name}`}
           </Animated.Text>
         </StatSlide>
       </View>
@@ -324,16 +346,19 @@ export function AnnualRecap({
       {/* Slide 8: Longest Streak */}
       <View key="8">
         <StatSlide colors={colors}>
-          <Animated.Text entering={FadeInDown.delay(200)} style={styles.statEmoji}>
+          <Animated.Text
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
+            style={styles.statEmoji}
+          >
             🔥
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(400)}
+            entering={FadeInDown.delay(400).reduceMotion(ReduceMotion.System)}
             style={[styles.slideTitle, { color: colors.text }]}
           >
             Longest Writing Streak
           </Animated.Text>
-          <Animated.View entering={FadeInDown.delay(600)}>
+          <Animated.View entering={FadeInDown.delay(600).reduceMotion(ReduceMotion.System)}>
             <Text style={[styles.streakText, { color: colors.partner1 }]}>
               {stats.partner_1_name}: {stats.partner_1_longest_streak}{' '}
               {stats.partner_1_longest_streak === 1 ? 'day' : 'days'}
@@ -346,19 +371,25 @@ export function AnnualRecap({
         </StatSlide>
       </View>
 
-      {/* Slide 9: Photos & Videos */}
+      {/* Slide 9: Photos & Voice memos */}
       <View key="9">
         <StatSlide colors={colors}>
-          <Animated.Text entering={FadeInDown.delay(200)} style={styles.statEmoji}>
+          <Animated.Text
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
+            style={styles.statEmoji}
+          >
             📸
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(400)}
+            entering={FadeInDown.delay(400).reduceMotion(ReduceMotion.System)}
             style={[styles.slideTitle, { color: colors.text }]}
           >
             Captured Memories
           </Animated.Text>
-          <Animated.View entering={FadeInDown.delay(600)} style={styles.mediaStats}>
+          <Animated.View
+            entering={FadeInDown.delay(600).reduceMotion(ReduceMotion.System)}
+            style={styles.mediaStats}
+          >
             <View style={styles.mediaStat}>
               <Text style={[styles.statBigNumber, { color: colors.primary, fontSize: 48 }]}>
                 {stats.total_media_images}
@@ -367,11 +398,14 @@ export function AnnualRecap({
             </View>
             <View style={styles.mediaStat}>
               <Text style={[styles.statBigNumber, { color: colors.accent, fontSize: 48 }]}>
-                {stats.total_media_videos}
+                {stats.total_media_audio ?? 0}
               </Text>
-              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>videos</Text>
+              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>voice memos</Text>
             </View>
           </Animated.View>
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+            {Math.round((stats.total_audio_duration_ms ?? 0) / 60000)} minutes recorded
+          </Text>
         </StatSlide>
       </View>
 
@@ -379,12 +413,15 @@ export function AnnualRecap({
       <View key="10">
         <StatSlide colors={colors}>
           <Animated.Text
-            entering={FadeInDown.delay(200)}
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
             style={[styles.slideTitle, { color: colors.text }]}
           >
             Your Go-To Moods
           </Animated.Text>
-          <Animated.View entering={FadeInDown.delay(500)} style={styles.moodDisplay}>
+          <Animated.View
+            entering={FadeInDown.delay(500).reduceMotion(ReduceMotion.System)}
+            style={styles.moodDisplay}
+          >
             <View style={styles.moodPerson}>
               <Text style={[styles.moodPersonName, { color: colors.partner1 }]}>
                 {stats.partner_1_name}
@@ -414,16 +451,22 @@ export function AnnualRecap({
       {/* Slide 11: First & Last Entry */}
       <View key="11">
         <StatSlide colors={colors}>
-          <Animated.Text entering={FadeInDown.delay(200)} style={styles.statEmoji}>
+          <Animated.Text
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
+            style={styles.statEmoji}
+          >
             📆
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(400)}
+            entering={FadeInDown.delay(400).reduceMotion(ReduceMotion.System)}
             style={[styles.slideTitle, { color: colors.text }]}
           >
             Your Journey
           </Animated.Text>
-          <Animated.View entering={FadeInDown.delay(600)} style={styles.journeyContainer}>
+          <Animated.View
+            entering={FadeInDown.delay(600).reduceMotion(ReduceMotion.System)}
+            style={styles.journeyContainer}
+          >
             <View style={styles.journeyPoint}>
               <View style={[styles.journeyDot, { backgroundColor: colors.primary }]} />
               <Text style={[styles.journeyLabel, { color: colors.textSecondary }]}>
@@ -451,12 +494,12 @@ export function AnnualRecap({
       <View key="12">
         <StatSlide colors={colors}>
           <Animated.Text
-            entering={FadeInDown.delay(200)}
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
             style={[styles.slideTitle, { color: colors.text }]}
           >
             Favorite Writing Days
           </Animated.Text>
-          <Animated.View entering={FadeInDown.delay(500)}>
+          <Animated.View entering={FadeInDown.delay(500).reduceMotion(ReduceMotion.System)}>
             <Text style={[styles.dowText, { color: colors.partner1 }]}>
               {stats.partner_1_name} loves {stats.partner_1_favorite_dow?.trim() || '—'}s
             </Text>
@@ -471,13 +514,16 @@ export function AnnualRecap({
       <View key="13">
         <StatSlide colors={colors}>
           <Animated.Text
-            entering={FadeInDown.delay(200)}
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
             style={[styles.slideTitle, { color: colors.text }]}
           >
             Your Love Map
           </Animated.Text>
           {stats.locations.length > 0 ? (
-            <Animated.View entering={FadeIn.delay(400)} style={styles.mapContainer}>
+            <Animated.View
+              entering={FadeIn.delay(400).reduceMotion(ReduceMotion.System)}
+              style={styles.mapContainer}
+            >
               <MapView
                 style={styles.map}
                 initialRegion={{
@@ -500,7 +546,7 @@ export function AnnualRecap({
                 ))}
               </MapView>
               <Text style={[styles.mapCaption, { color: colors.textSecondary }]}>
-                You made memories in {stats.unique_location_count} different{' '}
+                Showing up to 200 tagged memories across {stats.unique_location_count} different{' '}
                 {stats.unique_location_count === 1 ? 'place' : 'places'}
               </Text>
             </Animated.View>
@@ -515,23 +561,31 @@ export function AnnualRecap({
       {/* Final Slide: Transition to entries */}
       <View key="outro">
         <StatSlide colors={colors}>
-          <Animated.Text entering={FadeInDown.delay(200)} style={styles.statEmoji}>
+          <Animated.Text
+            entering={FadeInDown.delay(200).reduceMotion(ReduceMotion.System)}
+            style={styles.statEmoji}
+          >
             💌
           </Animated.Text>
           <Animated.Text
-            entering={FadeInDown.delay(400)}
+            entering={FadeInDown.delay(400).reduceMotion(ReduceMotion.System)}
             style={[styles.readyTitle, { color: colors.text }]}
           >
             Now, read what {partnerName} wrote for you...
           </Animated.Text>
-          <Animated.View entering={FadeInUp.delay(800)} style={styles.outroButtons}>
+          <Animated.View
+            entering={FadeInUp.delay(800).reduceMotion(ReduceMotion.System)}
+            style={styles.outroButtons}
+          >
             <TouchableOpacity
+              accessibilityRole="button"
               style={[styles.openButton, { backgroundColor: colors.primary }]}
               onPress={onRead}
             >
               <Text style={styles.openButtonText}>Read Their Entries</Text>
             </TouchableOpacity>
             <TouchableOpacity
+              accessibilityRole="button"
               style={[styles.replayButton, { borderColor: colors.textMuted }]}
               onPress={() => pagerRef.current?.setPage(0)}
             >
@@ -555,7 +609,8 @@ const styles = StyleSheet.create({
     width: SCREEN_WIDTH,
   },
   slideContent: {
-    flex: 1,
+    flexGrow: 1,
+    paddingVertical: Spacing.lg,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: Spacing.xl,

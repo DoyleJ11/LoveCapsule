@@ -1,3 +1,4 @@
+import { errorMessage } from '../lib/errors';
 import { useState, useCallback, useRef } from 'react';
 import { useCouple } from '../providers/CoupleProvider';
 import { supabase } from '../lib/supabase';
@@ -65,8 +66,8 @@ export function useCheckpoint(): UseCheckpointReturn {
       if (activeCouple.current !== coupleId) return;
       setConfigsScope(coupleId);
       setConfigs(data ?? []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
     }
   }, []);
 
@@ -81,8 +82,8 @@ export function useCheckpoint(): UseCheckpointReturn {
       const response = data as CheckpointTodayResponse;
       setIsCheckpointDay(response.is_checkpoint_day);
       setTodaysCheckpoints(response.checkpoints);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
     }
   }, []);
 
@@ -115,8 +116,8 @@ export function useCheckpoint(): UseCheckpointReturn {
       setNoEntriesRemaining(response.no_entries);
 
       return true;
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
       return false;
     } finally {
       inFlight.current = false;
@@ -132,8 +133,8 @@ export function useCheckpoint(): UseCheckpointReturn {
 
       if (historyError) throw historyError;
       setCheckpointHistory(data ?? []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
     }
   }, []);
 
@@ -145,8 +146,8 @@ export function useCheckpoint(): UseCheckpointReturn {
 
       if (countError) throw countError;
       setUnrevealedCount(data ?? 0);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
     }
   }, []);
 
@@ -160,7 +161,7 @@ export function useCheckpoint(): UseCheckpointReturn {
           p_couple_id: config.couple_id,
           p_id: config.id ?? null,
           p_expected_version: null,
-          p_config: config,
+          p_config: { ...config },
         });
 
         if (insertError) throw insertError;
@@ -168,8 +169,8 @@ export function useCheckpoint(): UseCheckpointReturn {
         // Reload configs
         await loadConfigs(config.couple_id);
         await refresh();
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e: unknown) {
+        setError(errorMessage(e));
         throw e;
       } finally {
         setLoading(false);
@@ -198,8 +199,8 @@ export function useCheckpoint(): UseCheckpointReturn {
         if (updateError) throw updateError;
 
         // update local state
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e: unknown) {
+        setError(errorMessage(e));
         throw e;
       } finally {
         setLoading(false);
@@ -227,8 +228,8 @@ export function useCheckpoint(): UseCheckpointReturn {
 
         // update local state
         setConfigs((prev) => prev.filter((c) => c.id !== id));
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e: unknown) {
+        setError(errorMessage(e));
         throw e;
       } finally {
         setLoading(false);
