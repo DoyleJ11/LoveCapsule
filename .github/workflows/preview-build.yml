@@ -1,16 +1,7 @@
 name: Preview Build
 
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - 'app/**'
-      - 'src/**'
-      - 'assets/**'
-      - 'app.json'
-      - 'eas.json'
-      - 'package*.json'
-      - '.github/workflows/preview-build.yml'
+  workflow_dispatch:
 
 concurrency:
   group: ios-preview-${{ github.ref }}
@@ -28,13 +19,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Setup Expo
         uses: expo/expo-github-action@v8
         with:
-          eas-version: latest
+          eas-version: '26.0.0'
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Install dependencies
