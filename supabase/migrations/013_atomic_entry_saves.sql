@@ -59,6 +59,7 @@ BEGIN
   SELECT COALESCE(jsonb_agg(storage_path), '[]') INTO v_removed FROM public.media
     WHERE id = ANY(p_remove_media) AND entry_id = p_entry_id AND author_id = v_user;
   v_html := '<p>' || replace(replace(replace(v_plain, '&', '&amp;'), '<', '&lt;'), '>', '&gt;') || '</p>';
+  v_html := replace(replace(v_html, '"', '&quot;'), chr(39), '&#39;');
   v_html := replace(v_html, E'\n', '</p><p>');
   INSERT INTO public.entries(id,couple_id,author_id,title,content_plain,content_html,word_count,
     mood,is_draft,entry_date,location_name,location_lat,location_lng,updated_at)

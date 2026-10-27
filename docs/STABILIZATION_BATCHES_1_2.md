@@ -65,9 +65,9 @@ and Storage's legacy/new duplicate-upload errors.
 ## Deployment order and limits
 
 1. Back up the database and review the migration list and existing membership /
-   reveal history. Migration 011 stops on multiple active memberships rather than
+   reveal history. Migration 012 stops on multiple active memberships rather than
    choosing which diary to delete. Resolve those manually if found.
-2. Apply migrations **011 then 012** to staging; rehearse the reveal and save flows
+2. Apply migrations **012 then 013** to staging; rehearse the reveal and save flows
    using two test accounts and physical iPhones. These changes have only been
    exercised in the local harness, not deployed to the live project.
 3. Deploy the app only after those RPCs/tables exist. The old snapshot/claim RPC
@@ -80,8 +80,10 @@ recipient reader/navigation, and production orphan cleanup are later batches.
 Anniversary edits after a reveal are intentionally blocked until future-cycle
 rescheduling has a safe API. February 29 behavior remains March 1.
 
-Existing damaged diary text is not automatically rewritten: ambiguous legacy
-HTML requires a backup and reviewed repair diff. The old unscoped
+The newer upstream dev commit already includes migration 011 for historical text
+repair. It is preserved unchanged; review it against a backup/staging copy before
+any production application because legacy text can be ambiguous. These batches
+add no further automatic historical text rewrite. The old unscoped
 `new_entry_draft` value is retained and not automatically assigned to the current
 account. It needs explicit account attribution before safe recovery. Recording
 interruption/device lifecycle and push behavior still need physical-device tests.

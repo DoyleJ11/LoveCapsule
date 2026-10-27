@@ -4,6 +4,7 @@ import { useAuth } from '../providers/AuthProvider';
 import { entryEvents } from '../lib/entryEvents';
 import type { Entry } from '../types/database';
 import { entryContent } from '../features/entries/content';
+import { fromContentHtml } from '../lib/entry-content';
 
 interface UseEntriesReturn {
   entries: Entry[];
@@ -27,6 +28,12 @@ export interface CreateEntryInput {
   location_name: string | null;
   location_lat: number | null;
   location_lng: number | null;
+}
+
+/** Compatibility for callers with only HTML; never discard supplied plain text. */
+export function extractPlainTextAndWordCount(html: string) {
+  const { content_plain, word_count } = entryContent(fromContentHtml(html));
+  return { content_plain, word_count };
 }
 
 export function useEntries(coupleId: string | undefined): UseEntriesReturn {
@@ -85,7 +92,9 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
   const createEntry = async (data: CreateEntryInput): Promise<Entry> => {
     if (!user) throw new Error('Not authenticated');
 
-    const { content_plain, content_html, word_count } = entryContent(data.content_plain);
+    const { content_plain, content_html, word_count } = entryContent(
+      data.content_plain ?? fromContentHtml(data.content_html)
+    );
 
     const { data: entry, error: createError } = await supabase
       .from('entries')
@@ -107,10 +116,15 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
   };
 
   const updateEntry = async (id: string, data: Partial<CreateEntryInput>) => {
-    const updateData: any = { ...data, updated_at: new Date().toISOString() };
+    const updateData: Partial<CreateEntryInput> & { updated_at: string } = {
+      ...data,
+      updated_at: new Date().toISOString(),
+    };
 
     if (data.content_plain !== undefined)
       Object.assign(updateData, entryContent(data.content_plain));
+    else if (data.content_html !== undefined)
+      Object.assign(updateData, entryContent(fromContentHtml(data.content_html)));
 
     const { error: updateError } = await supabase.from('entries').update(updateData).eq('id', id);
 

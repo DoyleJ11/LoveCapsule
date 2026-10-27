@@ -35,7 +35,7 @@ GRANT ALL ON ALL TABLES IN SCHEMA storage TO anon,authenticated,service_role;
 ''')
 for migration in sorted((ROOT / 'supabase/migrations').glob('*.sql')):
     source = migration.read_text()
-    if migration.name.startswith('011_'):
+    if migration.name.startswith('012_reveal_'):
         import legacy_upgrade
         legacy_upgrade.prepare()
     if migration.name.startswith('001_'):
@@ -45,7 +45,7 @@ for migration in sorted((ROOT / 'supabase/migrations').glob('*.sql')):
         policy = source[start:end]
         source = source[:start] + source[end:] + '\n' + policy
     run(source)
-    if migration.name.startswith('011_'):
+    if migration.name.startswith('012_reveal_'):
         legacy_upgrade.verify()
         print('Legacy upgrade fixture: passed', flush=True)
 suite = unittest.TestSuite()

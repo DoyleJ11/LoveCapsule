@@ -85,7 +85,7 @@ DO $$ BEGIN
     SELECT partner_1_id user_id FROM public.couples UNION ALL
     SELECT partner_2_id FROM public.couples WHERE partner_2_id IS NOT NULL
   ) memberships GROUP BY user_id HAVING count(*) > 1) THEN
-    RAISE EXCEPTION 'Resolve existing multiple couple memberships before applying migration 011';
+    RAISE EXCEPTION 'Resolve existing multiple couple memberships before applying migration 012';
   END IF;
 END $$;
 CREATE FUNCTION public.enforce_single_couple() RETURNS TRIGGER

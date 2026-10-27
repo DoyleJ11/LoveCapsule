@@ -1,9 +1,10 @@
-/** Plain text is canonical. Generating HTML must never change the diary's words. */
+import { toContentHtml, countWords } from '../../lib/entry-content';
+
+/** Share the upstream canonical encoding with both save paths. */
 export function entryContent(plain: string) {
-  const escaped = plain.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return {
     content_plain: plain,
-    content_html: `<p>${escaped.replace(/\n/g, '</p><p>')}</p>`,
-    word_count: plain.trim() ? plain.trim().split(/\s+/).length : 0,
+    content_html: toContentHtml(plain),
+    word_count: countWords(plain),
   };
 }
