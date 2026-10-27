@@ -1,5 +1,7 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Button } from '../../../src/components/Button';
 import { useCallback, useState } from 'react';
-import { View, Text, Button, SafeAreaView, Alert, StyleSheet, useColorScheme } from 'react-native';
+import { View, Text, Alert, StyleSheet, useColorScheme } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { useCouple } from '../../../src/providers/CoupleProvider';
@@ -53,16 +55,22 @@ function Detail() {
       </View>
     );
   return (
-    <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
+    <SafeAreaView
+      edges={['left', 'right']}
+      style={[styles.screen, { backgroundColor: colors.background }]}
+    >
       <View style={styles.controls}>
-        <Button title="Back" onPress={() => router.back()} />
         <Button
-          title={entry?.is_draft ? 'Edit / publish draft' : 'Edit note'}
+          variant="primary"
+          style={styles.editAction}
+          title={entry?.is_draft ? 'Edit draft' : 'Edit note'}
           disabled={!entry || busy}
           onPress={() => router.push({ pathname: '/(tabs)/entries/new', params: { entryId: id } })}
         />
         <Button
           title="Delete note"
+          variant="destructive"
+          icon="trash"
           disabled={!entry || busy}
           onPress={() =>
             Alert.alert(
@@ -92,7 +100,7 @@ function Detail() {
         />
       </View>
       {error && (
-        <View>
+        <View style={styles.message}>
           <Text accessibilityRole="alert" style={{ color: colors.error }}>
             {error}
           </Text>
@@ -100,12 +108,14 @@ function Detail() {
         </View>
       )}
       {entry?.is_draft && (
-        <Text style={{ color: colors.textSecondary }}>Draft · visible only to you</Text>
+        <Text style={[styles.message, { color: colors.textSecondary }]}>
+          Draft · visible only to you
+        </Text>
       )}
       {entry ? (
         <EntryReader key={`${entry.id}:${entry.updated_at}`} entry={entry} />
       ) : (
-        !error && <Text style={{ color: colors.text }}>Loading note…</Text>
+        !error && <Text style={[styles.message, { color: colors.text }]}>Loading note…</Text>
       )}
     </SafeAreaView>
   );
@@ -113,5 +123,7 @@ function Detail() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  controls: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap' },
+  controls: { flexDirection: 'row', gap: 12, padding: 16, flexWrap: 'wrap' },
+  editAction: { flexGrow: 1 },
+  message: { paddingHorizontal: 16 },
 });

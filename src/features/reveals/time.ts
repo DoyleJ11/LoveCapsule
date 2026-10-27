@@ -14,6 +14,30 @@ export function validTimezone(zone: string): boolean {
     return false;
   }
 }
+export function deviceTimezone(): string {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return validTimezone(zone) ? zone : 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+/** Reveal cards show the same instant in the viewer's local timezone. */
+export function formatLocalRevealInstant(instant: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(instant));
+}
+export function formatWallTime(time: string): string {
+  const [hour, minute] = time.split(':').map(Number);
+  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(
+    new Date(2000, 0, 15, hour, minute)
+  );
+}
 export function formatRevealInstant(instant: string, timezone: string): string {
   return `${new Intl.DateTimeFormat(undefined, {
     timeZone: timezone,

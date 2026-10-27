@@ -1,4 +1,4 @@
-import { diagnosticSnapshot } from '../../../src/lib/diagnostics';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { errorMessage } from '../../../src/lib/errors';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -15,15 +15,17 @@ import {
   Share,
   Platform,
   Modal,
-  SafeAreaView,
   Switch,
 } from 'react-native';
 import { uuid } from 'expo-modules-core';
 import { useFocusEffect } from '@react-navigation/native';
 import { AnnualScheduleEditor } from '../../../src/features/reveals/AnnualScheduleEditor';
+import { Button, IconButton } from '../../../src/components/Button';
 import { ScheduleFields } from '../../../src/features/reveals/ScheduleFields';
 import {
   calendarDate,
+  deviceTimezone,
+  formatWallTime,
   validTimezone,
   formatRevealInstant,
 } from '../../../src/features/reveals/time';
@@ -54,7 +56,7 @@ const FREQUENCY_OPTIONS: { value: CheckpointFrequency; label: string }[] = [
   { value: 'specific_date', label: 'One-time date' },
 ];
 
-const DAY_OPTIONS = Array.from({ length: 28 }, (_, i) => i + 1);
+const DAY_OPTIONS = Array.from({ length: 31 }, (_, i) => i + 1);
 
 export default function SettingsScreen() {
   const { profile, user, refreshProfile } = useAuth();
@@ -78,6 +80,10 @@ export default function SettingsScreen() {
     deleteConfig,
     loading: checkpointLoading,
   } = useCheckpoint();
+  const [notificationLoading, setNotificationLoading] = useState(false);
+  const notificationBusy = useRef(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const deletionBusy = useRef(false);
   const [unpairingLoading, setUnpairingLoading] = useState(false);
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -96,7 +102,7 @@ export default function SettingsScreen() {
   const [, setCheckpointMonths] = useState<number[]>([3, 6, 9, 12]);
   const [checkpointSpecificDate, setCheckpointSpecificDate] = useState<Date>(new Date());
   const [checkpointTime, setCheckpointTime] = useState('00:00');
-  const [checkpointZone, setCheckpointZone] = useState('UTC');
+  const [checkpointZone, setCheckpointZone] = useState(deviceTimezone);
   const [checkpointLabel, setCheckpointLabel] = useState('');
   const [checkpointActive, setCheckpointActive] = useState(true);
   const [showCheckpointDatePicker, setShowCheckpointDatePicker] = useState(false);
@@ -119,7 +125,7 @@ export default function SettingsScreen() {
     setShowCheckpointDatePicker(false);
     checkpointCreateId.current = config?.id ?? uuid.v4();
     setCheckpointTime(config?.reveal_time ?? couple?.reveal_time ?? '00:00');
-    setCheckpointZone(config?.timezone ?? couple?.reveal_timezone ?? 'UTC');
+    setCheckpointZone(config?.timezone ?? deviceTimezone());
     if (config) {
       setEditingCheckpoint(config);
       setCheckpointFrequency(config.frequency);
@@ -357,6 +363,60 @@ export default function SettingsScreen() {
     ]);
   };
 
+  const handleNotifications = async (enable: boolean) => {
+    if (!user || notificationBusy.current) return;
+    notificationBusy.current = true;
+    setNotificationLoading(true);
+    try {
+      if (enable) {
+        const token = await registerForPushNotifications(user.id, true);
+        await refreshProfile();
+        Alert.alert(
+          'Notifications',
+          token
+            ? 'Enabled on this phone.'
+            : 'Allow notifications in iPhone Settings to enable reminders.'
+        );
+      } else {
+        await unregisterPushDevice();
+        Alert.alert('Notifications', 'Disabled on this phone.');
+      }
+    } catch (e) {
+      Alert.alert('Notifications', errorMessage(e));
+    } finally {
+      notificationBusy.current = false;
+      setNotificationLoading(false);
+    }
+  };
+  const handleDeleteAccount = () => {
+    if (!user || deletionBusy.current) return;
+    Alert.alert(
+      'Delete account?',
+      'This removes your account and the shared diary for both partners. Private file cleanup continues securely in the background. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: async () => {
+            if (deletionBusy.current) return;
+            deletionBusy.current = true;
+            setDeletingAccount(true);
+            try {
+              await requestDeletion('account', user.id);
+              await signOut();
+            } catch (e) {
+              Alert.alert('Deletion', errorMessage(e));
+            } finally {
+              deletionBusy.current = false;
+              setDeletingAccount(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -377,7 +437,7 @@ export default function SettingsScreen() {
               <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
             ) : (
               <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-                <Text style={styles.avatarText}>
+                <Text maxFontSizeMultiplier={1.2} style={styles.avatarText}>
                   {profile?.display_name?.charAt(0)?.toUpperCase() || '?'}
                 </Text>
               </View>
@@ -539,7 +599,7 @@ export default function SettingsScreen() {
                 <Image source={{ uri: partnerAvatarUrl }} style={styles.partnerAvatarImage} />
               ) : (
                 <View style={[styles.partnerAvatar, { backgroundColor: colors.accent }]}>
-                  <Text style={styles.avatarText}>
+                  <Text maxFontSizeMultiplier={1.2} style={styles.avatarText}>
                     {partner.display_name?.charAt(0)?.toUpperCase() || '?'}
                   </Text>
                 </View>
@@ -631,22 +691,17 @@ export default function SettingsScreen() {
                     </View>
                   </View>
                   <View style={styles.checkpointItemActions}>
-                    <TouchableOpacity
-                      accessibilityRole="button"
-                      style={styles.checkpointItemButton}
-                      accessibilityLabel={`Edit ${config.label || 'checkpoint'}`}
+                    <IconButton
+                      label={`Edit ${config.label || 'checkpoint'}`}
+                      icon="pencil"
                       onPress={() => openCheckpointModal(config)}
-                    >
-                      <FontAwesome name="pencil" size={14} color={colors.textSecondary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      accessibilityRole="button"
-                      style={styles.checkpointItemButton}
-                      accessibilityLabel={`Delete ${config.label || 'checkpoint'}`}
+                    />
+                    <IconButton
+                      label={`Delete ${config.label || 'checkpoint'}`}
+                      icon="trash"
+                      destructive
                       onPress={() => handleDeleteCheckpoint(config)}
-                    >
-                      <FontAwesome name="trash" size={14} color={colors.error} />
-                    </TouchableOpacity>
+                    />
                   </View>
                 </View>
               ))}
@@ -672,21 +727,28 @@ export default function SettingsScreen() {
         visible={showCheckpointModal && checkpointModalScope === `${user?.id}:${couple?.id}`}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setShowCheckpointModal(false)}
+        onRequestClose={() => {
+          if (!checkpointLoading) setShowCheckpointModal(false);
+        }}
       >
         <SafeAreaView style={[styles.modalContainer, { backgroundColor: colors.background }]}>
           <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-            <TouchableOpacity onPress={() => setShowCheckpointModal(false)}>
-              <Text style={[styles.modalCancel, { color: colors.textSecondary }]}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>
+            <Button
+              title="Cancel"
+              compact
+              disabled={checkpointLoading}
+              onPress={() => setShowCheckpointModal(false)}
+            />
+            <Text maxFontSizeMultiplier={1.4} style={[styles.modalTitle, { color: colors.text }]}>
               {editingCheckpoint ? 'Edit Checkpoint' : 'New Checkpoint'}
             </Text>
-            <TouchableOpacity onPress={handleSaveCheckpoint} disabled={checkpointLoading}>
-              <Text style={[styles.modalSave, { color: colors.primary }]}>
-                {checkpointLoading ? 'Saving...' : 'Save'}
-              </Text>
-            </TouchableOpacity>
+            <Button
+              title="Save"
+              variant="primary"
+              compact
+              loading={checkpointLoading}
+              onPress={handleSaveCheckpoint}
+            />
           </View>
 
           <ScrollView
@@ -726,7 +788,7 @@ export default function SettingsScreen() {
                       {
                         backgroundColor:
                           checkpointFrequency === opt.value
-                            ? colors.primary
+                            ? colors.primaryAction
                             : colors.surfaceSecondary,
                         borderColor:
                           checkpointFrequency === opt.value ? colors.primary : colors.border,
@@ -751,26 +813,26 @@ export default function SettingsScreen() {
             {checkpointFrequency !== 'specific_date' && (
               <View style={styles.formGroup}>
                 <Text style={[styles.formLabel, { color: colors.text }]}>Day of Month</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.dayScroller}
-                >
+                <View style={styles.dayGrid}>
                   {DAY_OPTIONS.map((day) => (
                     <TouchableOpacity
                       accessibilityRole="button"
                       key={day}
+                      hitSlop={2}
+                      accessibilityLabel={`Day ${day}`}
+                      accessibilityState={{ selected: checkpointDay === day }}
                       style={[
                         styles.dayOption,
                         {
                           backgroundColor:
-                            checkpointDay === day ? colors.primary : colors.surfaceSecondary,
+                            checkpointDay === day ? colors.primaryAction : colors.surfaceSecondary,
                           borderColor: checkpointDay === day ? colors.primary : colors.border,
                         },
                       ]}
                       onPress={() => setCheckpointDay(day)}
                     >
                       <Text
+                        maxFontSizeMultiplier={1.4}
                         style={[
                           styles.dayOptionText,
                           { color: checkpointDay === day ? '#fff' : colors.text },
@@ -780,7 +842,12 @@ export default function SettingsScreen() {
                       </Text>
                     </TouchableOpacity>
                   ))}
-                </ScrollView>
+                </View>
+                {checkpointDay > 28 && (
+                  <Text style={[styles.formHint, { color: colors.textSecondary }]}>
+                    Shorter months use their last day.
+                  </Text>
+                )}
               </View>
             )}
 
@@ -816,21 +883,22 @@ export default function SettingsScreen() {
             )}
 
             <ScheduleFields
+              disabled={checkpointLoading}
               time={checkpointTime}
               zone={checkpointZone}
               onTime={setCheckpointTime}
               onZone={setCheckpointZone}
             />
-            <Text style={{ color: colors.textSecondary, marginVertical: Spacing.md }}>
+            <Text style={[styles.scheduleSummary, { color: colors.textSecondary }]}>
               {checkpointFrequency === 'specific_date'
-                ? `One time on ${calendarDate(checkpointSpecificDate)}`
-                : 'Repeats on the selected days'}{' '}
-              at {checkpointTime.slice(0, 5)} · {checkpointZone}. Missed reveals stay available.
-              Changes affect future occurrences; already due or opened reveals stay saved.
+                ? `One time on ${formatEntryDate(calendarDate(checkpointSpecificDate))}`
+                : `${FREQUENCY_OPTIONS.find((option) => option.value === checkpointFrequency)?.label} on day ${checkpointDay}`}
+              {' at '}
+              {formatWallTime(checkpointTime)}.
             </Text>
             {/* Active Toggle */}
             <View style={[styles.formGroup, styles.toggleRow]}>
-              <View>
+              <View style={styles.toggleText}>
                 <Text style={[styles.formLabel, { color: colors.text, marginBottom: 0 }]}>
                   Active
                 </Text>
@@ -848,98 +916,54 @@ export default function SettingsScreen() {
         </SafeAreaView>
       </Modal>
 
-      <View style={[styles.section, { backgroundColor: colors.surface }]}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Privacy on this phone</Text>
-        <Text style={{ color: colors.textSecondary }}>
-          Draft text and sessions are encrypted in Keychain. Unsaved attachments stay in this app’s
-          private files. Signing out keeps drafts for your next sign-in; unpairing or deleting your
-          account removes local drafts on this phone. Other phones can retain their local drafts;
-          removing the app may also leave Keychain data. This app does not provide end-to-end
-          encryption or a separate biometric lock.
-        </Text>
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={() =>
-            Alert.alert(
-              'Recent diagnostics',
-              JSON.stringify(diagnosticSnapshot(), null, 2) || 'No recent failures.'
-            )
-          }
-        >
-          <Text style={{ color: colors.primary }}>View recent diagnostic references</Text>
-        </TouchableOpacity>
-      </View>
       <View
         style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}
       >
         <Text style={[styles.sectionTitle, { color: colors.text }]}>Notifications</Text>
-        <Text style={{ color: colors.textSecondary }}>
+        <Text style={[styles.notificationDescription, { color: colors.textSecondary }]}>
           Optional reminders contain no diary text. Reveals work even when notifications are off.
         </Text>
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={async () => {
-            try {
-              const token = await registerForPushNotifications(user!.id, true);
-              await refreshProfile();
-              Alert.alert(
-                'Notifications',
-                token
-                  ? 'Enabled on this phone.'
-                  : 'Allow notifications in iPhone Settings to enable reminders.'
-              );
-            } catch (e) {
-              Alert.alert('Notifications', errorMessage(e));
-            }
-          }}
-        >
-          <Text style={{ color: colors.primary }}>Enable on this phone</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={async () => {
-            try {
-              await unregisterPushDevice();
-              Alert.alert('Notifications', 'Disabled on this phone.');
-            } catch {
-              Alert.alert('Notifications', 'Could not update registration. Please retry.');
-            }
-          }}
-        >
-          <Text style={{ color: colors.primary }}>Disable on this phone</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={() =>
-            Alert.alert(
-              'Delete account?',
-              'This removes your account and the shared diary for both partners. Private file cleanup continues securely in the background. This cannot be undone.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete account',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await requestDeletion('account', user!.id);
-                      await signOut();
-                    } catch (e) {
-                      Alert.alert('Deletion', errorMessage(e));
-                    }
-                  },
-                },
-              ]
-            )
-          }
-        >
-          <Text style={{ color: colors.error }}>Delete my account and shared diary</Text>
-        </TouchableOpacity>
+        <View style={styles.notificationActions}>
+          <Button
+            compact
+            title="Enable"
+            variant="primary"
+            icon="bell"
+            disabled={notificationLoading}
+            style={styles.equalAction}
+            onPress={() => void handleNotifications(true)}
+          />
+          <Button
+            compact
+            title="Disable"
+            icon="bell-slash"
+            disabled={notificationLoading}
+            style={styles.equalAction}
+            onPress={() => void handleNotifications(false)}
+          />
+        </View>
+      </View>
+      <View
+        style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      >
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Account</Text>
+        <Text style={[styles.notificationDescription, { color: colors.textSecondary }]}>
+          Permanently removes your account and the shared diary for both partners.
+        </Text>
+        <Button
+          title="Delete my account and diary"
+          variant="destructive"
+          icon="trash"
+          loading={deletingAccount}
+          onPress={handleDeleteAccount}
+        />
       </View>
 
       {/* Sign Out */}
       <TouchableOpacity
         accessibilityRole="button"
         style={[styles.signOutButton, { borderColor: colors.error }]}
+        disabled={deletingAccount}
         onPress={handleSignOut}
       >
         <FontAwesome name="sign-out" size={16} color={colors.error} />
@@ -950,6 +974,10 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
+  notificationDescription: { fontSize: FontSize.sm, lineHeight: 21, marginBottom: Spacing.md },
+  notificationActions: { flexDirection: 'row', gap: Spacing.sm },
+  equalAction: { flex: 1 },
+  scheduleSummary: { fontSize: FontSize.sm, lineHeight: 21, marginVertical: Spacing.md },
   container: {
     flex: 1,
   },
@@ -1128,9 +1156,9 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   addButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1178,14 +1206,7 @@ const styles = StyleSheet.create({
   },
   checkpointItemActions: {
     flexDirection: 'row',
-    gap: Spacing.md,
-  },
-  checkpointItemButton: {
-    minWidth: 44,
-    minHeight: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: Spacing.xs,
+    gap: Spacing.xs,
   },
   nextCheckpointText: {
     fontSize: FontSize.sm,
@@ -1204,14 +1225,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalTitle: {
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: Spacing.sm,
     fontSize: FontSize.lg,
-    fontWeight: '600',
-  },
-  modalCancel: {
-    fontSize: FontSize.md,
-  },
-  modalSave: {
-    fontSize: FontSize.md,
     fontWeight: '600',
   },
   modalContent: {
@@ -1245,6 +1262,8 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   frequencyOption: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.sm,
@@ -1254,16 +1273,19 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     fontWeight: '500',
   },
-  dayScroller: {
-    maxHeight: 44,
+  dayGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    rowGap: Spacing.sm,
   },
   dayOption: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: '13%',
+    marginRight: '1%',
+    minHeight: 44,
+    borderRadius: BorderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: Spacing.xs,
     borderWidth: 1,
   },
   dayOptionText: {
@@ -1282,7 +1304,9 @@ const styles = StyleSheet.create({
   dateButtonText: {
     fontSize: FontSize.md,
   },
+  toggleText: { flex: 1 },
   toggleRow: {
+    gap: Spacing.md,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',

@@ -1,20 +1,21 @@
+import { Button } from '../../components/Button';
 import { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
   ScrollView,
   Image,
-  Button,
   ActivityIndicator,
   useColorScheme,
   AppState,
+  StyleSheet,
   Linking,
 } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
 import { supabase } from '../../lib/supabase';
 import { getSignedUrl } from '../../lib/storage';
 import { formatEntryDate, formatDuration } from '../../lib/date-utils';
-import { Colors, Spacing } from '../../constants/theme';
+import { Colors, Spacing, BorderRadius, Moods } from '../../constants/theme';
 import type { Entry, Media } from '../../types/database';
 
 function AudioAttachment({ url, onFailure }: { url: string; onFailure: () => void }) {
@@ -63,6 +64,7 @@ function AudioAttachment({ url, onFailure }: { url: string; onFailure: () => voi
   );
 }
 function Attachment({ media }: { media: Media }) {
+  const colors = Colors[useColorScheme() ?? 'light'];
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -96,7 +98,9 @@ function Attachment({ media }: { media: Media }) {
     <View style={{ marginVertical: Spacing.md }}>
       {error ? (
         <>
-          <Text accessibilityRole="alert">{error}</Text>
+          <Text accessibilityRole="alert" style={{ color: colors.error }}>
+            {error}
+          </Text>
           <Button title="Retry attachment" onPress={retry} />
         </>
       ) : !url ? (
@@ -105,7 +109,7 @@ function Attachment({ media }: { media: Media }) {
         <Image
           accessibilityLabel="Attached photo"
           source={{ uri: url }}
-          style={{ width: '100%', height: 300 }}
+          style={styles.photo}
           resizeMode="contain"
           onError={() => setError('Photo could not be downloaded. Retry to refresh its link.')}
         />
@@ -152,23 +156,22 @@ export function EntryReader({ entry }: { entry: Entry }) {
     };
   }, [entry.id, attempt]);
   return (
-    <ScrollView contentContainerStyle={{ padding: Spacing.lg }}>
-      <Text style={{ fontSize: 26, fontWeight: '700', color: colors.text }}>
-        {entry.title || 'Untitled note'}
-      </Text>
-      <Text style={{ color: colors.textSecondary }}>
-        {formatEntryDate(entry.entry_date)}
-        {entry.mood ? ` · ${entry.mood}` : ''}
-      </Text>
-      {entry.location_name && (
-        <Text style={{ color: colors.textSecondary }}>{entry.location_name}</Text>
-      )}
-      <Text
-        selectable
-        style={{ fontSize: 18, lineHeight: 28, marginVertical: Spacing.lg, color: colors.text }}
-      >
-        {entry.content_plain}
-      </Text>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <View style={[styles.note, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={[styles.title, { color: colors.text }]}>{entry.title || 'Untitled note'}</Text>
+        <Text style={{ color: colors.textSecondary }}>
+          {formatEntryDate(entry.entry_date)}
+          {entry.mood
+            ? ` · ${Moods.find((mood) => mood.key === entry.mood)?.emoji ?? entry.mood}`
+            : ''}
+        </Text>
+        {entry.location_name && (
+          <Text style={{ color: colors.textSecondary }}>{entry.location_name}</Text>
+        )}
+        <Text selectable style={[styles.body, { color: colors.text }]}>
+          {entry.content_plain}
+        </Text>
+      </View>
       {loading && <ActivityIndicator accessibilityLabel="Loading attachments" />}
       {error && (
         <>
@@ -184,3 +187,12 @@ export function EntryReader({ entry }: { entry: Entry }) {
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: { flex: 1 },
+  content: { padding: Spacing.md, paddingBottom: Spacing.xl, gap: Spacing.sm },
+  note: { borderRadius: BorderRadius.lg, borderWidth: 1, padding: Spacing.lg, gap: Spacing.sm },
+  title: { fontSize: 26, fontWeight: '700' },
+  body: { fontSize: 18, lineHeight: 28, marginVertical: Spacing.md },
+  photo: { width: '100%', height: 300, borderRadius: BorderRadius.md },
+});

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useColorScheme, View, Text, Button, StyleSheet } from 'react-native';
@@ -95,12 +96,14 @@ export default function RootLayout() {
       </View>
     );
   return (
-    <AuthProvider>
-      <CoupleProvider>
-        <NotificationProvider />
-        <RootLayoutNav />
-      </CoupleProvider>
-    </AuthProvider>
+    <KeyboardProvider>
+      <AuthProvider>
+        <CoupleProvider>
+          <NotificationProvider />
+          <RootLayoutNav />
+        </CoupleProvider>
+      </AuthProvider>
+    </KeyboardProvider>
   );
 }
 

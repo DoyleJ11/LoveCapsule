@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { View, Text, TextInput, Button, useColorScheme, StyleSheet, Platform } from 'react-native';
+import { View, Text, Pressable, useColorScheme, StyleSheet, Platform } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Colors } from '../../constants/theme';
-import { DST_RULE, wallTime } from './time';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { Colors, Spacing, BorderRadius, FontSize } from '../../constants/theme';
+import { DST_RULE, formatWallTime, wallTime } from './time';
+import { TimezonePicker } from './TimezonePicker';
 
 export function ScheduleFields({
   time,
@@ -18,56 +20,104 @@ export function ScheduleFields({
   disabled?: boolean;
 }) {
   const [picker, setPicker] = useState(false);
-  const colors = Colors[useColorScheme() ?? 'light'];
+  const [timezoneOpen, setTimezoneOpen] = useState(false);
+  const [details, setDetails] = useState(false);
+  const scheme = useColorScheme() ?? 'light';
+  const colors = Colors[scheme];
   const [h, m] = time.split(':').map(Number);
   return (
     <View style={styles.form}>
-      <Text style={{ color: colors.text }}>Reveal time · {time.slice(0, 5)}</Text>
-      <Button
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Choose exact time"
+        accessibilityState={{ expanded: picker, disabled }}
         disabled={disabled}
-        title="Choose exact time"
+        style={[styles.field, { backgroundColor: colors.surface, borderColor: colors.border }]}
         onPress={() => setPicker((value) => !value)}
-      />
+      >
+        <FontAwesome name="clock-o" size={20} color={colors.primary} />
+        <View style={styles.fieldText}>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>Reveal time</Text>
+          <Text style={[styles.value, { color: colors.text }]}>{formatWallTime(time)}</Text>
+        </View>
+        <FontAwesome
+          name={picker ? 'chevron-up' : 'chevron-down'}
+          size={12}
+          color={colors.textMuted}
+        />
+      </Pressable>
       {picker && (
         <DateTimePicker
           value={new Date(2000, 0, 15, h || 0, m || 0)}
           disabled={disabled}
           mode="time"
           display="spinner"
+          themeVariant={scheme}
           onChange={(_, date) => {
             if (date) onTime(wallTime(date));
             if (Platform.OS !== 'ios') setPicker(false);
           }}
         />
       )}
-      <Text style={{ color: colors.text }}>Timezone (IANA name)</Text>
-      <TextInput
-        editable={!disabled}
+      <Pressable
+        accessibilityRole="button"
         accessibilityLabel="Reveal timezone"
-        autoCapitalize="none"
-        autoCorrect={false}
-        value={zone}
-        onChangeText={onZone}
-        placeholder="America/Los_Angeles"
-        placeholderTextColor={colors.textMuted}
-        style={[
-          styles.input,
-          { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface },
-        ]}
-      />
-      <Button
+        accessibilityValue={{ text: zone }}
         disabled={disabled}
-        title="Use this device’s timezone"
-        onPress={() => onZone(Intl.DateTimeFormat().resolvedOptions().timeZone)}
+        accessibilityState={{ disabled }}
+        onPress={() => setTimezoneOpen(true)}
+        style={[styles.field, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      >
+        <FontAwesome name="globe" size={20} color={colors.primary} />
+        <View style={styles.fieldText}>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>Timezone</Text>
+          <Text style={[styles.value, { color: colors.text }]}>{zone.replace(/_/g, ' ')}</Text>
+        </View>
+        <FontAwesome name="chevron-right" size={12} color={colors.textMuted} />
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: details }}
+        onPress={() => setDetails((value) => !value)}
+        style={styles.detailsButton}
+      >
+        <FontAwesome name="info-circle" size={16} color={colors.textSecondary} />
+        <Text style={[styles.label, { color: colors.textSecondary }]}>How timing works</Text>
+        <FontAwesome
+          name={details ? 'chevron-up' : 'chevron-down'}
+          size={10}
+          color={colors.textMuted}
+        />
+      </Pressable>
+      {details && (
+        <Text style={[styles.hint, { color: colors.textSecondary }]}>
+          {DST_RULE} Missed reveals stay available. Changes apply to future reveals; opened memories
+          stay saved.
+        </Text>
+      )}
+      <TimezonePicker
+        visible={timezoneOpen}
+        zone={zone}
+        onSelect={onZone}
+        onClose={() => setTimezoneOpen(false)}
       />
-      <Text style={{ color: colors.textSecondary }}>{DST_RULE}</Text>
-      <Text style={{ color: colors.text }}>
-        Both partners open at {time.slice(0, 5)} in {zone}.
-      </Text>
     </View>
   );
 }
 const styles = StyleSheet.create({
-  form: { gap: 10 },
-  input: { borderWidth: 1, padding: 12, borderRadius: 8 },
+  form: { gap: Spacing.sm },
+  field: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    borderWidth: 1,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    minHeight: 64,
+  },
+  fieldText: { flex: 1 },
+  label: { fontSize: FontSize.sm },
+  value: { fontSize: FontSize.md, fontWeight: '500', marginTop: Spacing.xs },
+  detailsButton: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'center', minHeight: 44 },
+  hint: { fontSize: FontSize.sm, lineHeight: 21 },
 });

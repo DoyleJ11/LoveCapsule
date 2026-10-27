@@ -181,6 +181,40 @@ class EventTests(unittest.TestCase):
         sql(f"SELECT calculate_reveal_stats('{COUPLE}',2026)",A,ok=False)
         sql(f"SELECT materialize_reveal_occurrences('{COUPLE}')",A,ok=False)
 
+    def test_month_end_recurring_days_clamp_without_spilling_or_duplicates(self):
+        sql('DELETE FROM checkpoint_configs')
+        # Materialize a fixed historical range, independent of the test clock.
+        for day in (29, 30, 31):
+            config = self.schedule('2024-01-01 19:30', zone='America/Los_Angeles', freq='monthly', day=day)
+            sql(f"UPDATE checkpoint_configs SET starts_on='2024-01-01',version_started_at='2024-01-01' WHERE id='{config['id']}'")
+            self.overview()
+            self.overview()
+            dates = json.loads(sql(f"SELECT json_agg((due_at AT TIME ZONE timezone)::date ORDER BY due_at) FROM reveal_occurrences WHERE config_id='{config['id']}'"))
+            self.assertIn('2024-02-29', dates)
+            self.assertIn('2025-02-28', dates)
+            self.assertIn('2024-04-' + str(min(day, 30)), dates)
+            self.assertNotIn('2024-03-01', dates)
+            self.assertEqual(len(dates), len(set(date[:7] for date in dates)))
+            self.assertEqual(sql(f"SELECT bool_and((due_at AT TIME ZONE timezone)::time='19:30') FROM reveal_occurrences WHERE config_id='{config['id']}'"), 't')
+            self.assertEqual(sql(f"SELECT count(*) FROM reveal_occurrences WHERE config_id='{config['id']}' AND due_at > now()"), '1')
+        for invalid in (0, 32):
+            with self.assertRaises(AssertionError):
+                self.schedule(freq='monthly', day=invalid)
+
+    def test_month_end_quarterly_semiannual_and_claims_survive_edits(self):
+        sql('DELETE FROM checkpoint_configs')
+        for frequency, months in [('quarterly', [3, 6, 9, 12]), ('semi_annual', [6, 12])]:
+            config = self.schedule('2024-01-01 12:00', freq=frequency, day=31)
+            sql(f"UPDATE checkpoint_configs SET starts_on='2024-01-01',version_started_at='2024-01-01' WHERE id='{config['id']}'")
+            overview = self.overview()
+            self.assertEqual(sql(f"SELECT bool_and(extract(month FROM due_at AT TIME ZONE timezone)::int = ANY(ARRAY{months})) FROM reveal_occurrences WHERE config_id='{config['id']}'"), 't')
+            self.assertEqual(sql(f"SELECT count(*) FROM reveal_occurrences WHERE config_id='{config['id']}' AND (due_at AT TIME ZONE timezone)::date='2024-06-30'"), '1')
+            occurrence = next(item['id'] for item in overview['checkpoints'] if item['id'] == sql(f"SELECT id FROM reveal_occurrences WHERE config_id='{config['id']}' AND due_at < now() ORDER BY due_at LIMIT 1"))
+            original = self.claim(occurrence)
+            self.schedule('2024-01-01 12:00', ident=config['id'], version=1, freq=frequency, day=30)
+            self.assertTrue(self.claim(occurrence)['already_revealed'])
+            self.assertEqual(self.claim(occurrence)['entry'], original['entry'])
+
     def test_foreign_legacy_schedule_cannot_leak_its_label(self):
         foreign=sql(f"INSERT INTO checkpoint_configs(couple_id,frequency,specific_date,label) VALUES('{OTHER}','specific_date',CURRENT_DATE,'Private foreign label') RETURNING id")
         sql(f"INSERT INTO checkpoint_reveals(couple_id,entry_id,revealed_to_user_id,checkpoint_date,checkpoint_config_id) VALUES('{COUPLE}','{E[0]}','{A}',CURRENT_DATE,'{foreign}')")

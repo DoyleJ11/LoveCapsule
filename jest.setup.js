@@ -1,3 +1,11 @@
+jest.mock('react-native-keyboard-controller', () =>
+  require('react-native-keyboard-controller/jest')
+);
+jest.mock(
+  'react-native-safe-area-context',
+  () => require('react-native-safe-area-context/jest/mock').default
+);
+
 // Jest setup file for React Native / Expo
 // Note: @testing-library/react-native v12.4+ has built-in matchers
 // See: https://callstack.github.io/react-native-testing-library/docs/migration/jest-matchers

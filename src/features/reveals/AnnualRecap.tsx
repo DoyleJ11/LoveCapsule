@@ -1,16 +1,15 @@
+import { Button } from '../../components/Button';
 import { useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   Dimensions,
   SafeAreaView,
   useColorScheme,
   ScrollView,
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 import Animated, { FadeIn, FadeInDown, FadeInUp, ReduceMotion } from 'react-native-reanimated';
 import MapView, { Marker } from 'react-native-maps';
 import { Colors, Spacing, FontSize, BorderRadius, Moods } from '../../constants/theme';
@@ -147,9 +146,7 @@ export function AnnualRecap({
         <Text style={[styles.statSubCaption, { color: colors.textSecondary }]}>
           There were no published notes before this opening time. Your next chapter starts here.
         </Text>
-        <TouchableOpacity accessibilityRole="button" onPress={onRead}>
-          <Text style={{ color: colors.primary }}>View capsule</Text>
-        </TouchableOpacity>
+        <Button title="View capsule" variant="primary" onPress={onRead} />
       </SafeAreaView>
     );
 
@@ -577,23 +574,12 @@ export function AnnualRecap({
             entering={FadeInUp.delay(800).reduceMotion(ReduceMotion.System)}
             style={styles.outroButtons}
           >
-            <TouchableOpacity
-              accessibilityRole="button"
-              style={[styles.openButton, { backgroundColor: colors.primary }]}
-              onPress={onRead}
-            >
-              <Text style={styles.openButtonText}>Read Their Entries</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              accessibilityRole="button"
-              style={[styles.replayButton, { borderColor: colors.textMuted }]}
+            <Button title="Read Their Entries" variant="primary" icon="heart" onPress={onRead} />
+            <Button
+              title="Replay from start"
+              icon="refresh"
               onPress={() => pagerRef.current?.setPage(0)}
-            >
-              <FontAwesome name="refresh" size={16} color={colors.textSecondary} />
-              <Text style={[styles.replayButtonText, { color: colors.textSecondary }]}>
-                Replay from start
-              </Text>
-            </TouchableOpacity>
+            />
           </Animated.View>
         </StatSlide>
       </View>
@@ -620,16 +606,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: Spacing.sm,
-  },
-  openButton: {
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-  },
-  openButtonText: {
-    color: '#fff',
-    fontSize: FontSize.lg,
-    fontWeight: '700',
   },
   slideTitle: {
     fontSize: FontSize.xl,
@@ -795,18 +771,5 @@ const styles = StyleSheet.create({
   outroButtons: {
     alignItems: 'center',
     gap: Spacing.md,
-  },
-  replayButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-  },
-  replayButtonText: {
-    fontSize: FontSize.md,
-    fontWeight: '500',
   },
 });
