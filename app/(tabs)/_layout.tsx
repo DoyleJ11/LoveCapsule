@@ -28,6 +28,7 @@ export default function TabLayout() {
           backgroundColor: colors.background,
         },
         headerTintColor: colors.text,
+        headerTitleAllowFontScaling: false,
       }}
     >
       <Tabs.Screen

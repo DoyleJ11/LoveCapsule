@@ -86,7 +86,7 @@ export default function HomeScreen() {
             Connect with your partner to start writing diary entries for each other
           </Text>
           <TouchableOpacity
-            style={[styles.ctaButton, { backgroundColor: colors.primary }]}
+            style={[styles.ctaButton, { backgroundColor: colors.primaryAction }]}
             onPress={() => router.push('/(tabs)/settings')}
           >
             <Text style={styles.ctaButtonText}>Get Started</Text>
@@ -103,7 +103,7 @@ export default function HomeScreen() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <Text style={[styles.greeting, { color: colors.textSecondary }]}>
+        <Text style={[styles.greeting, { color: colors.text }]}>
           Hello, {profile?.display_name}
         </Text>
         {partner && (
@@ -119,7 +119,10 @@ export default function HomeScreen() {
           style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
         >
           <View style={styles.countdownContent}>
-            <Text style={[styles.countdownNumber, { color: colors.primary }]}>
+            <Text
+              maxFontSizeMultiplier={1.4}
+              style={[styles.countdownNumber, { color: colors.primary }]}
+            >
               {daysUntilAnniversary}
             </Text>
             <Text style={[styles.countdownLabel, { color: colors.textSecondary }]}>
@@ -132,7 +135,7 @@ export default function HomeScreen() {
       {/* Reveal Button */}
       {isRevealReady && (
         <TouchableOpacity
-          style={[styles.revealButton, { backgroundColor: colors.primary }]}
+          style={[styles.revealButton, { backgroundColor: colors.primaryAction }]}
           onPress={() => router.push('/(tabs)/reveal')}
         >
           <FontAwesome name="gift" size={24} color="#fff" />
@@ -150,13 +153,19 @@ export default function HomeScreen() {
         <Text style={[styles.cardTitle, { color: colors.text }]}>Your Diary</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { color: colors.primary }]}>
+            <Text
+              maxFontSizeMultiplier={1.6}
+              style={[styles.statNumber, { color: colors.primary }]}
+            >
               {summary?.entries ?? publishedEntries.length}
             </Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>entries</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={[styles.statNumber, { color: colors.primary }]}>
+            <Text
+              maxFontSizeMultiplier={1.6}
+              style={[styles.statNumber, { color: colors.primary }]}
+            >
               {(summary?.words ?? totalWords).toLocaleString()}
             </Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>words</Text>
@@ -193,7 +202,7 @@ export default function HomeScreen() {
 
       {/* Write Entry CTA */}
       <TouchableOpacity
-        style={[styles.writeButton, { backgroundColor: colors.primary }]}
+        style={[styles.writeButton, { backgroundColor: colors.primaryAction }]}
         onPress={() => {
           // Navigate to entries tab first, then push the new entry modal.
           // Using router.navigate ensures the entries stack is properly initialized
