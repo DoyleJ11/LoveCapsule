@@ -38,12 +38,21 @@ export function extractPlainTextAndWordCount(html: string) {
 
 export function useEntries(coupleId: string | undefined): UseEntriesReturn {
   const { user } = useAuth();
+  const authorId = user?.id;
+  const scope = `${authorId ?? ''}:${coupleId ?? ''}`;
+  const activeScope = useRef(scope);
+  activeScope.current = scope;
+  const request = useRef(0);
+  const [entriesScope, setEntriesScope] = useState<string>();
+  const [errorScope, setErrorScope] = useState<string>();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchEntries = useCallback(async () => {
-    if (!user || !coupleId) {
+    const ticket = ++request.current;
+    const current = () => activeScope.current === scope && request.current === ticket;
+    if (!authorId || !coupleId) {
       setEntries([]);
       setError(null);
       setLoading(false);
@@ -52,25 +61,32 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
 
     setLoading(true);
     setError(null);
+    setErrorScope(scope);
     try {
       const { data, error: fetchError } = await supabase
         .from('entries')
         .select('*')
         .eq('couple_id', coupleId)
-        .eq('author_id', user.id)
+        .eq('author_id', authorId)
         .order('entry_date', { ascending: false });
 
       if (fetchError) throw fetchError;
+      if (!current()) return;
+      setEntriesScope(scope);
       setEntries(data ?? []);
     } catch (e: any) {
-      setError(e.message);
+      if (current()) setError(e.message);
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
-  }, [user, coupleId]);
+  }, [authorId, coupleId, scope]);
 
   useEffect(() => {
     fetchEntries();
+    const pending = request;
+    return () => {
+      pending.current++;
+    };
   }, [fetchEntries]);
 
   // Listen for entry-change events fired by OTHER useEntries instances
@@ -144,9 +160,9 @@ export function useEntries(coupleId: string | undefined): UseEntriesReturn {
   };
 
   return {
-    entries,
+    entries: entriesScope === scope ? entries : [],
     loading,
-    error,
+    error: errorScope === scope ? error : null,
     createEntry,
     updateEntry,
     deleteEntry,

@@ -38,6 +38,9 @@ for migration in sorted((ROOT / 'supabase/migrations').glob('*.sql')):
     if migration.name.startswith('012_reveal_'):
         import legacy_upgrade
         legacy_upgrade.prepare()
+    if migration.name.startswith('014_'):
+        import event_upgrade
+        event_upgrade.prepare()
     if migration.name.startswith('001_'):
         # Scratch-only ordering shim. Never rewrite an applied migration.
         start = source.index('CREATE POLICY "Users can view partner profile"')
@@ -48,7 +51,13 @@ for migration in sorted((ROOT / 'supabase/migrations').glob('*.sql')):
     if migration.name.startswith('012_reveal_'):
         legacy_upgrade.verify()
         print('Legacy upgrade fixture: passed', flush=True)
+    if migration.name.startswith('014_'):
+        event_upgrade.verify_events()
+        print('Annual event upgrade fixture: passed', flush=True)
+    if migration.name.startswith('015_'):
+        event_upgrade.verify_occurrences()
+        print('Occurrence upgrade fixture: passed', flush=True)
 suite = unittest.TestSuite()
-for name in ('reveal_guardrails', 'entry_saves'):
+for name in ('reveal_guardrails', 'entry_saves', 'reveal_events'):
     suite.addTests(unittest.defaultTestLoader.loadTestsFromName(name))
 sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
