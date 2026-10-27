@@ -1,3 +1,4 @@
+import { errorMessage } from '../../lib/errors';
 import { useState } from 'react';
 import {
   View,
@@ -90,8 +91,8 @@ export function AnnualScheduleEditor() {
                   try {
                     await saveAnnualSchedule(calendarDate(date), time, zone.trim(), version);
                     setOpen(false);
-                  } catch (e: any) {
-                    Alert.alert('Could not save schedule', e.message);
+                  } catch (e: unknown) {
+                    Alert.alert('Could not save schedule', errorMessage(e));
                   } finally {
                     setSaving(false);
                   }

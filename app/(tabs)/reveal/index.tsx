@@ -52,6 +52,7 @@ export function RevealExperience({ coupleId }: { coupleId: string }) {
   const action = useReveal(coupleId);
   const { cancel } = action;
   const [flow, setFlow] = useState<Flow>({ kind: 'home' });
+  const [libraryMore, setLibraryMore] = useState(true);
   const [allAuthors, setAllAuthors] = useState(false);
   const colors = Colors[useColorScheme() ?? 'light'];
   useFocusEffect(
@@ -66,6 +67,7 @@ export function RevealExperience({ coupleId }: { coupleId: string }) {
   const annual = async (year: number, open: boolean) => {
     const event = await action.annual(year, open);
     if (!event) return;
+    setLibraryMore(event.entries.length === 50);
     setAllAuthors(false);
     setFlow({ kind: 'recap', event });
     void refresh();
@@ -87,6 +89,12 @@ export function RevealExperience({ coupleId }: { coupleId: string }) {
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <Button title="Close capsule" onPress={() => setFlow({ kind: 'home' })} />
           {flow.kind === 'reader' && <Button title="Back" onPress={() => setFlow(flow.back)} />}
+          {flow.kind === 'recap' && (
+            <Button
+              title="Skip to notes"
+              onPress={() => setFlow({ kind: 'library', event: flow.event })}
+            />
+          )}
           {flow.kind === 'library' && (
             <Button
               title="Replay recap"
@@ -138,10 +146,42 @@ export function RevealExperience({ coupleId }: { coupleId: string }) {
               <View key={entry.id} style={{ marginVertical: Spacing.sm }}>
                 <Button
                   title={`${entry.title || 'Untitled note'} · ${entry.entry_date}`}
-                  onPress={() => setFlow({ kind: 'reader', entry, back: flow })}
+                  onPress={async () => {
+                    const full = await action.legacyEntry(entry.id);
+                    if (full) setFlow({ kind: 'reader', entry: full, back: flow });
+                  }}
                 />
               </View>
             ))}
+          {libraryMore && (
+            <Button
+              title="Load more capsule notes"
+              disabled={action.loading}
+              onPress={async () => {
+                const last = flow.event.entries.at(-1);
+                const rows = await action.moreAnnual(
+                  flow.event.reveal_year,
+                  last?.entry_date,
+                  last?.id
+                );
+                if (rows) {
+                  setLibraryMore(rows.length === 50);
+                  setFlow({
+                    ...flow,
+                    event: {
+                      ...flow.event,
+                      entries: [
+                        ...flow.event.entries,
+                        ...rows.filter(
+                          (row) => !flow.event.entries.some((old) => old.id === row.id)
+                        ),
+                      ],
+                    },
+                  });
+                }
+              }}
+            />
+          )}
         </ScrollView>
       ) : (
         <ScrollView

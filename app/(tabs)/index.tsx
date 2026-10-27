@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useColorScheme } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -19,8 +19,21 @@ export default function HomeScreen() {
     isRevealReady,
     loading: coupleLoading,
   } = useCouple();
-  const { entries, refresh: refreshEntries } = useEntries(couple?.id);
-  const [partnerEntryCount, setPartnerEntryCount] = useState<number>(0);
+  const { entries, summary, error: diaryError, refresh: refreshEntries } = useEntries(couple?.id);
+  const [partnerCount, setPartnerCount] = useState<{
+    scope: string;
+    count: number | null;
+    error: boolean;
+  } | null>(null);
+  const partnerEntryCount =
+    partnerCount && partnerCount.scope === couple?.id ? partnerCount.count : null;
+  const countScope = useRef(couple?.id);
+  useEffect(() => {
+    countScope.current = couple?.id;
+    return () => {
+      countScope.current = undefined;
+    };
+  }, [couple?.id]);
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -29,8 +42,9 @@ export default function HomeScreen() {
 
   const fetchPartnerCount = useCallback(() => {
     if (coupleId) {
-      supabase.rpc('get_partner_entry_count', { p_couple_id: coupleId }).then(({ data }) => {
-        if (data !== null) setPartnerEntryCount(data);
+      supabase.rpc('get_partner_entry_count', { p_couple_id: coupleId }).then(({ data, error }) => {
+        if (countScope.current === coupleId)
+          setPartnerCount({ scope: coupleId, count: error ? null : data, error: !!error });
       });
     }
   }, [coupleId]);
@@ -67,7 +81,7 @@ export default function HomeScreen() {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.centered}>
           <FontAwesome name="heart" size={64} color={colors.primary} />
-          <Text style={[styles.welcomeTitle, { color: colors.text }]}>Welcome to TimeCapsule</Text>
+          <Text style={[styles.welcomeTitle, { color: colors.text }]}>Welcome to LoveCapsule</Text>
           <Text style={[styles.welcomeSubtitle, { color: colors.textSecondary }]}>
             Connect with your partner to start writing diary entries for each other
           </Text>
@@ -122,23 +136,28 @@ export default function HomeScreen() {
           onPress={() => router.push('/(tabs)/reveal')}
         >
           <FontAwesome name="gift" size={24} color="#fff" />
-          <Text style={styles.revealButtonText}>Open Your TimeCapsule!</Text>
+          <Text style={styles.revealButtonText}>Open Your LoveCapsule!</Text>
         </TouchableOpacity>
       )}
 
+      {diaryError && (
+        <Text accessibilityRole="alert" style={{ color: colors.error }}>
+          {diaryError}
+        </Text>
+      )}
       {/* Your Stats */}
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={[styles.cardTitle, { color: colors.text }]}>Your Diary</Text>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <Text style={[styles.statNumber, { color: colors.primary }]}>
-              {publishedEntries.length}
+              {summary?.entries ?? publishedEntries.length}
             </Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>entries</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={[styles.statNumber, { color: colors.primary }]}>
-              {totalWords.toLocaleString()}
+              {(summary?.words ?? totalWords).toLocaleString()}
             </Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>words</Text>
           </View>
@@ -153,10 +172,18 @@ export default function HomeScreen() {
           <Text style={[styles.cardTitle, { color: colors.text }]}>
             {partner.display_name}'s Diary
           </Text>
-          <Text style={[styles.partnerTeaser, { color: colors.textSecondary }]}>
-            {partnerEntryCount === 0
-              ? 'No entries yet'
-              : `${partnerEntryCount} ${partnerEntryCount === 1 ? 'entry' : 'entries'} waiting for you`}
+          <Text
+            onPress={fetchPartnerCount}
+            accessibilityRole="button"
+            style={[styles.partnerTeaser, { color: colors.textSecondary }]}
+          >
+            {partnerEntryCount === null
+              ? partnerCount?.scope === coupleId && partnerCount?.error
+                ? 'Could not load the count. Tap to retry.'
+                : 'Loading count…'
+              : partnerEntryCount === 0
+                ? 'No entries yet'
+                : `${partnerEntryCount} ${partnerEntryCount === 1 ? 'entry' : 'entries'} waiting for you`}
           </Text>
           <Text style={[styles.teaserHint, { color: colors.textMuted }]}>
             You'll get to read them on your anniversary

@@ -77,3 +77,9 @@ it('stops and preserves an active recording on unexpected unmount', async () => 
   expect(mockRecorder.stop).toHaveBeenCalledTimes(1);
   expect(keep).toHaveBeenCalled();
 });
+it('enforces the five-minute native recording limit', async () => {
+  mockState.isRecording = false;
+  const hook = renderHook(() => useVoiceMemo(jest.fn(async () => 'document/kept.m4a')));
+  await act(() => hook.result.current.startRecording());
+  expect(mockRecorder.record).toHaveBeenCalledWith({ forDuration: 300 });
+});

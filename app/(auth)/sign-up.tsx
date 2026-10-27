@@ -1,3 +1,4 @@
+import { errorMessage } from '../../src/lib/errors';
 import { useState } from 'react';
 import {
   View,
@@ -41,8 +42,8 @@ export default function SignUpScreen() {
       } else {
         Alert.alert('Success', 'Account created! Please check your email to verify.');
       }
-    } catch (e: any) {
-      Alert.alert('Sign Up Failed', e.message);
+    } catch (e: unknown) {
+      Alert.alert('Sign Up Failed', errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -56,7 +57,7 @@ export default function SignUpScreen() {
       <View style={styles.content}>
         <Text style={[styles.title, { color: colors.text }]}>Create Account</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Start your TimeCapsule journey together
+          Start your LoveCapsule journey together
         </Text>
 
         <View style={styles.form}>

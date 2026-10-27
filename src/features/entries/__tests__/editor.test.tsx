@@ -38,6 +38,10 @@ jest.mock('../../../hooks/useVoiceMemo', () => ({
     resetRecording: jest.fn(),
   }),
 }));
+jest.mock('../../../lib/secure-storage', () => {
+  const storage = require('@react-native-async-storage/async-storage');
+  return { encryptedStorage: storage.default ?? storage };
+});
 jest.mock('../api', () => ({ loadEditableEntry: jest.fn(), saveEntry: jest.fn() }));
 jest.mock('../files', () => ({ keepDraftFile: jest.fn(), removeDraftFiles: jest.fn() }));
 jest.mock('../../../lib/storage', () => ({ getSignedUrl: jest.fn(), compressImage: jest.fn() }));

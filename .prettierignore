@@ -24,3 +24,11 @@ package-lock.json
 # Misc
 .DS_Store
 *.log
+
+# Local user notes; not part of the tracked application
+CLAUDE 2.md
+# Deno has its own formatter and type checks
+supabase/functions/
+
+# Existing user-owned formatting change; keep this batch out of that file.
+tsconfig.json

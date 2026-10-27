@@ -1,3 +1,4 @@
+import { errorMessage } from '../lib/errors';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
 import {
@@ -123,12 +124,12 @@ export function useVoiceMemo(
 
       if (recordingActive.current) return;
       await recorder.prepareToRecordAsync();
-      recorder.record();
+      recorder.record({ forDuration: 300 });
       recordingActive.current = true;
       recorderStopped.current = false;
       pendingRecording.current = null;
-    } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to start recording');
+    } catch (e: unknown) {
+      Alert.alert('Error', errorMessage(e) || 'Failed to start recording');
     }
   }, [recorder]);
 
@@ -186,6 +187,12 @@ export function useVoiceMemo(
     return stopping.current;
   }, [recorder]);
   stopOnUnmount.current = stopRecording;
+  useEffect(() => {
+    if (recordingActive.current && recorderState.durationMillis >= 299900) {
+      if (!recorderState.isRecording) recorderStopped.current = true;
+      void stopRecording();
+    }
+  }, [recorderState.durationMillis, recorderState.isRecording, stopRecording]);
 
   const playAudio = useCallback(
     (uri?: string) => {

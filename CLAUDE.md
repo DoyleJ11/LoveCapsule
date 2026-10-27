@@ -31,14 +31,13 @@ npx tsc --noEmit      # typecheck
 npm run ios           # simulator (needs .env, see .env.example)
 ```
 
-CI (`pr-checks.yml`) only runs on PRs to `main`, so **PRs into `dev` get no CI** — run `validate` locally.
-ESLint rules are all `warn`, so lint exits 0 with ~90 warnings. Exit code 0 ≠ clean; don't add new warnings.
+CI (`pr-checks.yml`) runs on PRs into `dev` and release branches: formatting, lint warning ceiling, TypeScript, Jest, PostgreSQL 17/RLS plus generated type drift, and Deno checks/worker tests. Run `validate` locally too; lower the warning ceiling as debt is removed.
 
 ## Testing
 
-- **Pure logic → Jest.** Extract testable logic rather than leaving it in components (see `supabase/functions/check-anniversary/reveal-logic.ts`, split out so Jest could cover it since Deno isn't available).
+- **Pure logic → Jest.** Extract testable logic rather than leaving it in components (see `supabase/functions/check-anniversary/reveal-logic.ts`, shared with Jest; Edge entrypoints are also typechecked with Deno 2 in CI).
 - **SQL / RLS / policies → real Postgres.** Do not eyeball SQL. Spin up a scratch cluster and prove it:
-  - `pg_ctl` refuses to run as root — run as the `postgres` user with a data dir under `/var/lib/postgresql`.
+  - Use a disposable local PostgreSQL 17 database named `lovecapsule_test_*`, then run `python3 scripts/test_database.py`. Never run fixtures against production.
   - Shim Supabase: `auth.users`, `auth.uid()` reading `request.jwt.claim.sub`, `storage.buckets`/`objects`/`foldername`, and roles `anon`/`authenticated`/`service_role`.
   - Act as a user with `SET ROLE authenticated;` + `SELECT set_config('request.jwt.claim.sub','<uuid>',false);` — RLS is skipped for table owners, so never test as `postgres`.
   - Migration 001 isn't replayable as-is (see Gotchas); reorder it in the scratch copy only.
@@ -55,19 +54,19 @@ supabase db push                               # migrations only
 supabase functions deploy check-anniversary    # db push does NOT deploy functions
 ```
 
-Release to TestFlight is tag-triggered (`production-release.yml`): bump `version` in `app.json`, commit, `git tag vX.Y.Z`, `git push origin main --tags`. Don't run `eas build` manually.
+Release to TestFlight is tag-triggered (`production-release.yml`): synchronize app/package/lockfile versions in a reviewed release PR, tag the merged main commit and push only that tag. The job uses auto-submit for its own build; never submit `--latest` or run a parallel production build. See `docs/reveal-rollout.md` for staging, worker secrets/Cron, Auth redirects, migrations/Edge deployments and phone installation.
 
 ## Gotchas
 
 - **supabase-js never throws.** It returns `{ data, error }`. Always destructure and check `error` — unchecked calls were a top source of silent failures in this repo.
-- **Migration 001 is not replayable from scratch**: it creates a `profiles` policy referencing `public.couples` before that table exists, so `supabase db reset` fails on a clean DB. If `migration list` shows an empty remote column, `supabase migration repair --status applied 001 ... 00N` rather than replaying.
-- **Reveal visibility** = `entry_date <= anniversary_in_year(anniversary_date, last_reveal_year)`. `couples.is_revealed` is **legacy** and is not used for access control anywhere — don't reintroduce it as a gate.
-- **Reveal/pairing columns are trigger-protected** (`is_revealed`, `last_reveal_year`, `invite_code`, partner ids). Only `SECURITY DEFINER` functions and `service_role` can write them. The Supabase **Table Editor can't** edit them — use the SQL Editor. `anniversary_date` is intentionally still app-writable.
-- **New `SECURITY DEFINER` functions** must call `assert_couple_member(couple_id)`, set `SET search_path = public`, and `REVOKE EXECUTE ... FROM PUBLIC, anon`.
+- **Migration 001 needs an empty-project baseline**: `scripts/build_bootstrap.py` uses the same tested ordering helper as database CI. Existing installations use normal migrations. Never mark migrations applied just because history is empty: verify/apply actual effects first. See the rollout guide.
+- **Reveal visibility** uses frozen annual manifests and recipient occurrence receipts. Do not reconstruct access with a movable anniversary cutoff or `couples.is_revealed`; that flag is legacy.
+- **Reveal/pairing columns are trigger-protected** (`is_revealed`, `last_reveal_year`, `invite_code`, partner ids). Only `SECURITY DEFINER` functions and `service_role` can write them. The Supabase **Table Editor can't** edit them — use the SQL Editor. Anniversary schedules use the versioned `save_annual_schedule` RPC; direct app writes are denied.
+- **New `SECURITY DEFINER` app APIs** must authenticate/authorize the target (use `assert_couple_member` for couple APIs), set an explicit search_path and revoke PUBLIC/anon execution. Trigger and service-only worker helpers are not exposed to app users; revoke authenticated execution too.
 - **Edge function auth** (`verify_jwt`) lives in `supabase/config.toml` and is applied by the CLI at deploy time.
 - **Edge functions must return 200 with `{ error }`** for business-rule failures — supabase-js discards bodies on non-2xx, so a 4xx reaches the app as "Edge Function returned a non-2xx status code". Reserve real status codes for auth/server errors.
 - **In-app dev tools** need both `EXPO_PUBLIC_DEV_TOOLS=true` and `profiles.is_admin = true` (set from the Supabase dashboard only).
-- Three screens are 1,000+ lines (`reveal/index.tsx`, `entries/new.tsx`, `settings/index.tsx`). Read the region you're changing; don't load them whole.
+- The editor and Settings remain large; reader, schedule, location and data boundaries have been extracted. Read the region you're changing; don't load them whole.
 
 ## Conventions
 

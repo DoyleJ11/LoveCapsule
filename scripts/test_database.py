@@ -4,6 +4,7 @@ import pathlib
 import subprocess
 import sys
 import unittest
+from migration_source import migration_source
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'supabase/tests'))
@@ -24,8 +25,8 @@ DO $$ BEGIN
 END $$;
 CREATE TABLE auth.users(id uuid PRIMARY KEY,raw_user_meta_data jsonb DEFAULT '{}');
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
-CREATE TABLE storage.buckets(id text PRIMARY KEY,name text,public boolean);
-CREATE TABLE storage.objects(id uuid DEFAULT gen_random_uuid(),bucket_id text,name text);
+CREATE TABLE storage.buckets(id text PRIMARY KEY,name text,public boolean,file_size_limit bigint);
+CREATE TABLE storage.objects(id uuid DEFAULT gen_random_uuid(),bucket_id text,name text,created_at timestamptz DEFAULT now());
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 CREATE FUNCTION storage.foldername(text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array($1,'/') $$;
 GRANT USAGE ON SCHEMA public,auth,storage TO anon,authenticated,service_role;
@@ -34,19 +35,13 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon,authentica
 GRANT ALL ON ALL TABLES IN SCHEMA storage TO anon,authenticated,service_role;
 ''')
 for migration in sorted((ROOT / 'supabase/migrations').glob('*.sql')):
-    source = migration.read_text()
+    source = migration_source(migration)
     if migration.name.startswith('012_reveal_'):
         import legacy_upgrade
         legacy_upgrade.prepare()
     if migration.name.startswith('014_'):
         import event_upgrade
         event_upgrade.prepare()
-    if migration.name.startswith('001_'):
-        # Scratch-only ordering shim. Never rewrite an applied migration.
-        start = source.index('CREATE POLICY "Users can view partner profile"')
-        end = source.index('CREATE POLICY "Users can update own profile"')
-        policy = source[start:end]
-        source = source[:start] + source[end:] + '\n' + policy
     run(source)
     if migration.name.startswith('012_reveal_'):
         legacy_upgrade.verify()
@@ -58,6 +53,6 @@ for migration in sorted((ROOT / 'supabase/migrations').glob('*.sql')):
         event_upgrade.verify_occurrences()
         print('Occurrence upgrade fixture: passed', flush=True)
 suite = unittest.TestSuite()
-for name in ('reveal_guardrails', 'entry_saves', 'reveal_events'):
+for name in ('reveal_guardrails', 'entry_saves', 'reveal_events', 'account_jobs'):
     suite.addTests(unittest.defaultTestLoader.loadTestsFromName(name))
 sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())

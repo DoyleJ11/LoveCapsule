@@ -1,4 +1,7 @@
-import { supabase } from './supabase';
+import { unregisterPushDevice } from './notifications';
+import { AUTH_CALLBACK } from '../features/account/links';
+import { supabase, authStorageKey } from './supabase';
+import { encryptedStorage } from './secure-storage';
 
 export async function signUp(email: string, password: string, displayName: string) {
   // Pass display_name via user metadata — a database trigger on auth.users
@@ -8,6 +11,7 @@ export async function signUp(email: string, password: string, displayName: strin
     password,
     options: {
       data: { display_name: displayName },
+      emailRedirectTo: AUTH_CALLBACK,
     },
   });
 
@@ -28,8 +32,16 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function signOut() {
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  // Logout must work offline; pushes contain no diary text or author names.
+  await unregisterPushDevice().catch(() => {});
+  const { error } = await supabase.auth.signOut({ scope: 'local' });
+  if (error) {
+    // A failed remote revocation must not trap this phone in an account. Clear
+    // the persisted session, then use the public SDK to emit SIGNED_OUT.
+    await encryptedStorage.removeItem(authStorageKey);
+    const retry = await supabase.auth.signOut({ scope: 'local' });
+    if (retry.error) throw retry.error;
+  }
 }
 
 export async function getSession() {

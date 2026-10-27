@@ -1,7 +1,8 @@
+import { recordFailure } from '../lib/diagnostics';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { errorMessage } from '../lib/errors';
 import { supabase } from '../lib/supabase';
-import type { AnnualEvent, Entry } from '../types/database';
+import type { AnnualEvent, Entry, EntrySummary } from '../types/database';
 
 /** Scope by account/couple at the screen boundary. Ignore unmounted responses. */
 export function useReveal(coupleId: string) {
@@ -26,6 +27,7 @@ export function useReveal(coupleId: string) {
       const result = await operation();
       return alive.current && sequence.current === ticket ? result : null;
     } catch (e: unknown) {
+      recordFailure('reveal');
       if (alive.current && sequence.current === ticket) setError(errorMessage(e));
       return null;
     } finally {
@@ -63,6 +65,19 @@ export function useReveal(coupleId: string) {
         throw new Error('Reveal confirmation was not received. Please retry.');
       return data;
     });
+  const moreAnnual = (year: number, date?: string, id?: string) =>
+    run<EntrySummary[]>(async () => {
+      const { data, error } = await supabase.rpc('list_annual_entries', {
+        p_couple_id: coupleId,
+        p_year: year,
+        p_before_date: date ?? null,
+        p_before_id: id ?? null,
+        p_limit: 50,
+      });
+      if (error) throw error;
+      if (!Array.isArray(data)) throw new Error('Notes could not be loaded. Please retry.');
+      return data;
+    });
   const legacyEntry = (entryId: string) =>
     run<Entry>(async () => {
       const { data, error } = await supabase
@@ -75,5 +90,5 @@ export function useReveal(coupleId: string) {
       if (!data) throw new Error('This note is no longer available.');
       return data;
     });
-  return { loading, error, annual, checkpoint, legacyEntry, cancel };
+  return { loading, error, annual, checkpoint, legacyEntry, cancel, moreAnnual };
 }

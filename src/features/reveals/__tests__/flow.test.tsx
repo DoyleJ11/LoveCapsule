@@ -60,12 +60,19 @@ it('opens annual history while the current year is locked, reads the cycle tail,
     },
     error: null,
   });
+  (supabase.from as jest.Mock).mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    eq: jest.fn().mockReturnThis(),
+    single: jest
+      .fn()
+      .mockResolvedValue({ data: { id: 'december', title: 'December memory' }, error: null }),
+  });
   const screen = render(<RevealExperience coupleId="couple" />);
   fireEvent.press(screen.getByText('Revisit 2026 anniversary'));
   fireEvent.press(await screen.findByText('Read Their Entries'));
   expect(screen.queryByText('My note · 2026-01-01')).toBeNull();
   fireEvent.press(screen.getByText('December memory · 2025-12-20'));
-  expect(screen.getByText('December memory')).toBeTruthy();
+  expect(await screen.findByText('December memory')).toBeTruthy();
   fireEvent.press(screen.getByText('Back'));
   fireEvent.press(screen.getByText('Replay recap'));
   await screen.findByText('Read Their Entries');

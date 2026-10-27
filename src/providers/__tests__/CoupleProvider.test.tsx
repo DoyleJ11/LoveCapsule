@@ -5,8 +5,9 @@ import { supabase } from '../../lib/supabase';
 let mockUser: { id: string } | null = { id: 'me' };
 let mockCouple: Record<string, unknown> | null;
 let mockOverview: Record<string, unknown>;
-let mockListener: (state: AppStateStatus) => void;
+let mockListeners: ((state: AppStateStatus) => void)[];
 jest.mock('../AuthProvider', () => ({ useAuth: () => ({ user: mockUser, profile: null }) }));
+jest.mock('../../features/account/deletion', () => ({ requestDeletion: jest.fn() }));
 jest.mock('../../lib/storage', () => ({ getSignedUrl: jest.fn() }));
 const membership = jest.fn();
 const flush = async () => {
@@ -17,6 +18,7 @@ beforeEach(() => {
   jest.setSystemTime(new Date('2026-12-31T23:59:00Z'));
   jest.clearAllMocks();
   mockUser = { id: 'me' };
+  mockListeners = [];
   mockCouple = {
     id: 'couple',
     partner_1_id: 'me',
@@ -50,7 +52,7 @@ beforeEach(() => {
   }));
   (supabase.rpc as jest.Mock).mockImplementation(async () => ({ data: mockOverview, error: null }));
   jest.spyOn(AppState, 'addEventListener').mockImplementation((_, listener) => {
-    mockListener = listener;
+    mockListeners.push(listener);
     return { remove: jest.fn() };
   });
 });
@@ -84,7 +86,7 @@ it('uses server time across a wrong device clock, refreshes at the deadline and 
   expect(hook.result.current.isRevealReady).toBe(true);
   const before = (supabase.rpc as jest.Mock).mock.calls.length;
   await act(async () => {
-    mockListener('active');
+    mockListeners.forEach((listener) => listener('active'));
     await flush();
   });
   expect((supabase.rpc as jest.Mock).mock.calls.length).toBe(before + 1);

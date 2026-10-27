@@ -28,7 +28,8 @@ def sql(statement, user=None, ok=True):
 
 class RevealGuardrails(unittest.TestCase):
     def setUp(self):
-        sql(f"""TRUNCATE auth.users CASCADE;
+        sql(f"""DO $$ BEGIN IF to_regclass('public.maintenance_jobs') IS NOT NULL THEN EXECUTE 'TRUNCATE public.maintenance_jobs,public.deletion_requests CASCADE'; END IF; END $$;
+        TRUNCATE auth.users CASCADE;
         INSERT INTO auth.users(id) VALUES('{A}'),('{B}'),('{C}'),('{D}');
         INSERT INTO couples(id,partner_1_id,partner_2_id,anniversary_date) VALUES
         ('{COUPLE}','{A}','{B}','2020-03-01'),('{OTHER}','{C}','{D}','2020-03-01');
