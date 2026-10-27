@@ -4,6 +4,8 @@ import {
   calendarDaysUntil,
   validTimezone,
   formatRevealInstant,
+  formatLocalRevealInstant,
+  deviceTimezone,
 } from '../time';
 it('serializes selected wall fields without UTC date shifting', () => {
   const date = new Date(2026, 0, 1, 0, 5);
@@ -39,4 +41,18 @@ it('validates names and rejects offset and unknown zones', () => {
   expect(validTimezone('America/Los_Angeles')).toBe(true);
   expect(validTimezone('Not/AZone')).toBe(false);
   expect(validTimezone('')).toBe(false);
+});
+
+it('formats reveal instants for the viewer without exposing a timezone identifier', () => {
+  const instant = '2027-01-01T08:00:00Z';
+  const expected = new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(instant));
+  expect(formatLocalRevealInstant(instant)).toBe(expected);
+  expect(formatLocalRevealInstant(instant)).not.toMatch(/UTC|GMT|America|Pacific/);
+  expect(validTimezone(deviceTimezone())).toBe(true);
 });

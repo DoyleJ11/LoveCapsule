@@ -1,4 +1,5 @@
-import { View, Button, Alert } from 'react-native';
+import { Button } from '../../components/Button';
+import { View, Alert } from 'react-native';
 import { useAuth } from '../../providers/AuthProvider';
 import { useCouple } from '../../providers/CoupleProvider';
 import { supabase } from '../../lib/supabase';

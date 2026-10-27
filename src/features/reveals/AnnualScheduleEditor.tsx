@@ -1,69 +1,122 @@
 import { errorMessage } from '../../lib/errors';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   View,
   Text,
-  Button,
   Modal,
-  SafeAreaView,
   ScrollView,
   Alert,
   useColorScheme,
+  StyleSheet,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useCouple } from '../../providers/CoupleProvider';
-import { Colors, Spacing } from '../../constants/theme';
+import { Colors, Spacing, FontSize } from '../../constants/theme';
+import { Button } from '../../components/Button';
 import { ScheduleFields } from './ScheduleFields';
-import { calendarDate, validTimezone } from './time';
+import { calendarDate, deviceTimezone, formatWallTime, validTimezone } from './time';
+import { formatEntryDate } from '../../lib/date-utils';
 
 export function AnnualScheduleEditor() {
   const { couple, saveAnnualSchedule } = useCouple();
-  const colors = Colors[useColorScheme() ?? 'light'];
+  const scheme = useColorScheme() ?? 'light';
+  const colors = Colors[scheme];
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState(new Date());
   const [time, setTime] = useState('00:00');
-  const [zone, setZone] = useState('UTC');
+  const [zone, setZone] = useState(deviceTimezone);
   const [version, setVersion] = useState(1);
   const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
   if (!couple) return null;
+  const save = async () => {
+    if (saveInFlight.current) return;
+    if (!validTimezone(zone.trim())) {
+      Alert.alert('Timezone', 'Choose a valid timezone.');
+      return;
+    }
+    saveInFlight.current = true;
+    setSaving(true);
+    try {
+      await saveAnnualSchedule(calendarDate(date), time, zone.trim(), version);
+      setOpen(false);
+    } catch (e: unknown) {
+      Alert.alert('Could not save schedule', errorMessage(e));
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
+    }
+  };
   return (
-    <View style={{ gap: 12 }}>
-      <Text style={{ fontSize: 22, color: colors.text }}>Anniversary reveal</Text>
-      <Text style={{ color: colors.text }}>
-        {couple.anniversary_date || 'No date set'} · {couple.reveal_time.slice(0, 5)} ·{' '}
-        {couple.reveal_timezone}
+    <View style={styles.cardContent}>
+      <View style={styles.headingRow}>
+        <FontAwesome name="heart" size={20} color={colors.primary} />
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Anniversary reveal</Text>
+      </View>
+      <Text style={[styles.date, { color: colors.text }]}>
+        {couple.anniversary_date
+          ? formatEntryDate(couple.anniversary_date)
+          : 'Choose your special day'}
       </Text>
+      {couple.anniversary_date && (
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+          {formatWallTime(couple.reveal_time)} · {couple.reveal_timezone.replace(/_/g, ' ')}
+        </Text>
+      )}
       <Button
         title="Set anniversary date and time"
+        icon="calendar"
         onPress={() => {
           setDate(
-            couple.anniversary_date ? new Date(`${couple.anniversary_date}T12:00:00`) : new Date()
+            couple.anniversary_date ? new Date(couple.anniversary_date + 'T12:00:00') : new Date()
           );
           setVersion(couple.schedule_version);
           setTime(couple.reveal_time);
-          setZone(couple.reveal_timezone);
+          setZone(couple.anniversary_date ? couple.reveal_timezone : deviceTimezone());
           setOpen(true);
         }}
       />
       {open && (
         <Modal
-          visible={open}
-          onRequestClose={() => {
-            if (!saving) setOpen(false);
-          }}
+          visible
           animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => {
+            if (!saveInFlight.current) setOpen(false);
+          }}
         >
-          <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-            <ScrollView contentContainerStyle={{ padding: Spacing.lg, gap: 16 }}>
-              <Text style={{ fontSize: 24, color: colors.text }}>Anniversary schedule</Text>
-              <Text style={{ color: colors.text }}>
-                Choose your relationship start date. The reveal repeats each year; February 29 opens
-                on March 1 in other years. Opened capsules keep their original boundary and recap.
+          <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
+            <View style={[styles.header, { borderBottomColor: colors.border }]}>
+              <Button title="Cancel" compact disabled={saving} onPress={() => setOpen(false)} />
+              <Text maxFontSizeMultiplier={1.4} style={[styles.heading, { color: colors.text }]}>
+                Anniversary
+              </Text>
+              <Button
+                title={saving ? 'Saving…' : 'Save'}
+                accessibilityLabel="Save anniversary schedule"
+                variant="primary"
+                compact
+                loading={saving}
+                onPress={() => void save()}
+              />
+            </View>
+            <ScrollView
+              style={styles.screen}
+              contentContainerStyle={styles.form}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+                Your relationship start date
               </Text>
               <DateTimePicker
                 value={date}
                 mode="date"
-                display="spinner"
+                display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                themeVariant={scheme}
+                accentColor={scheme === 'dark' ? colors.primary : colors.primaryAction}
                 disabled={saving}
                 onChange={(_, value) => {
                   if (value) setDate(value);
@@ -76,29 +129,14 @@ export function AnnualScheduleEditor() {
                 onTime={setTime}
                 onZone={setZone}
               />
-              <Text style={{ color: colors.text }}>
-                Save: {calendarDate(date)} at {time.slice(0, 5)} · {zone}
+              <Text style={[styles.summary, { color: colors.textSecondary }]}>
+                Every year on{' '}
+                {new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric' }).format(date)}{' '}
+                at {formatWallTime(time)}.
+                {date.getMonth() === 1 && date.getDate() === 29
+                  ? ' Opens March 1 in non-leap years.'
+                  : ''}
               </Text>
-              <Button
-                title={saving ? 'Saving…' : 'Save anniversary schedule'}
-                disabled={saving}
-                onPress={async () => {
-                  if (!validTimezone(zone.trim())) {
-                    Alert.alert('Timezone', 'Choose a valid IANA timezone.');
-                    return;
-                  }
-                  setSaving(true);
-                  try {
-                    await saveAnnualSchedule(calendarDate(date), time, zone.trim(), version);
-                    setOpen(false);
-                  } catch (e: unknown) {
-                    Alert.alert('Could not save schedule', errorMessage(e));
-                  } finally {
-                    setSaving(false);
-                  }
-                }}
-              />
-              <Button title="Cancel" disabled={saving} onPress={() => setOpen(false)} />
             </ScrollView>
           </SafeAreaView>
         </Modal>
@@ -106,3 +144,22 @@ export function AnnualScheduleEditor() {
     </View>
   );
 }
+const styles = StyleSheet.create({
+  screen: { flex: 1 },
+  cardContent: { gap: Spacing.sm },
+  headingRow: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'center' },
+  sectionTitle: { fontSize: FontSize.lg, fontWeight: '600', flexShrink: 1 },
+  date: { fontSize: FontSize.lg, fontWeight: '500', marginTop: Spacing.sm },
+  subtitle: { fontSize: FontSize.sm, lineHeight: 21 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: Spacing.md,
+    borderBottomWidth: 1,
+    gap: Spacing.sm,
+  },
+  heading: { fontSize: FontSize.lg, fontWeight: '600', flex: 1, textAlign: 'center' },
+  form: { padding: Spacing.md, gap: Spacing.md, paddingBottom: Spacing.xxl },
+  summary: { fontSize: FontSize.sm, lineHeight: 21 },
+});

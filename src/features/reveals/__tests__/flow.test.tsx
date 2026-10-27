@@ -70,8 +70,8 @@ it('opens annual history while the current year is locked, reads the cycle tail,
   const screen = render(<RevealExperience coupleId="couple" />);
   fireEvent.press(screen.getByText('Revisit 2026 anniversary'));
   fireEvent.press(await screen.findByText('Read Their Entries'));
-  expect(screen.queryByText('My note · 2026-01-01')).toBeNull();
-  fireEvent.press(screen.getByText('December memory · 2025-12-20'));
+  expect(screen.queryByLabelText('My note · 2026-01-01')).toBeNull();
+  fireEvent.press(screen.getByLabelText('December memory · 2025-12-20'));
   expect(await screen.findByText('December memory')).toBeTruthy();
   fireEvent.press(screen.getByText('Back'));
   fireEvent.press(screen.getByText('Replay recap'));

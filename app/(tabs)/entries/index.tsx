@@ -1,70 +1,12 @@
-import { useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  useColorScheme,
-  Button,
-} from 'react-native';
+import { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, useColorScheme } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useCouple } from '../../../src/providers/CoupleProvider';
 import { useEntries } from '../../../src/hooks/useEntries';
-import { formatRelativeDay } from '../../../src/lib/date-utils';
-import { Colors, Spacing, FontSize, BorderRadius, Moods } from '../../../src/constants/theme';
-import type { EntrySummary } from '../../../src/types/database';
-
-function EntryCard({ entry, colors }: { entry: EntrySummary; colors: (typeof Colors)['light'] }) {
-  const router = useRouter();
-  const mood = Moods.find((m) => m.key === entry.mood);
-
-  return (
-    <TouchableOpacity
-      style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}
-      onPress={() => router.push(`/(tabs)/entries/${entry.id}`)}
-    >
-      <View style={styles.cardHeader}>
-        <View style={styles.cardHeaderLeft}>
-          {entry.is_draft && (
-            <View style={[styles.draftBadge, { backgroundColor: colors.warning + '20' }]}>
-              <Text style={[styles.draftBadgeText, { color: colors.warning }]}>Draft</Text>
-            </View>
-          )}
-          {mood && <Text style={styles.moodEmoji}>{mood.emoji}</Text>}
-        </View>
-        <Text style={[styles.cardDate, { color: colors.textMuted }]}>
-          {formatRelativeDay(entry.entry_date)}
-        </Text>
-      </View>
-
-      <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
-        {entry.title || 'Untitled Entry'}
-      </Text>
-
-      {entry.content_plain ? (
-        <Text style={[styles.cardPreview, { color: colors.textSecondary }]} numberOfLines={2}>
-          {entry.content_plain}
-        </Text>
-      ) : null}
-
-      <View style={styles.cardFooter}>
-        <Text style={[styles.wordCount, { color: colors.textMuted }]}>
-          {entry.word_count} {entry.word_count === 1 ? 'word' : 'words'}
-        </Text>
-        {entry.location_name && (
-          <View style={styles.locationRow}>
-            <FontAwesome name="map-marker" size={12} color={colors.textMuted} />
-            <Text style={[styles.locationText, { color: colors.textMuted }]} numberOfLines={1}>
-              {entry.location_name}
-            </Text>
-          </View>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
-}
+import { Button } from '../../../src/components/Button';
+import { NoteCard } from '../../../src/components/NoteCard';
+import { Colors, Spacing, FontSize } from '../../../src/constants/theme';
 
 export default function EntriesListScreen() {
   const { couple, loading: coupleLoading } = useCouple();
@@ -77,19 +19,24 @@ export default function EntriesListScreen() {
     refresh,
   } = useEntries(couple?.id);
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
-
+  const colors = Colors[useColorScheme() ?? 'light'];
+  const [refreshing, setRefreshing] = useState(false);
   const loading = coupleLoading || entriesLoading;
-
-  // Auto-refresh entries when the screen gains focus (e.g., after creating/editing/deleting)
   useFocusEffect(
     useCallback(() => {
-      if (couple?.id) refresh();
+      if (couple?.id) void refresh();
     }, [couple?.id, refresh])
   );
 
-  if (!couple) {
+  const pullToRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  if (!couple)
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: colors.background }]}>
         <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
@@ -97,12 +44,10 @@ export default function EntriesListScreen() {
         </Text>
       </View>
     );
-  }
-
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {error && (
-        <View>
+        <View style={styles.error}>
           <Text accessibilityRole="alert" style={{ color: colors.error }}>
             {error}
           </Text>
@@ -112,16 +57,30 @@ export default function EntriesListScreen() {
       <FlatList
         data={entries}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <EntryCard entry={item} colors={colors} />}
+        renderItem={({ item }) => (
+          <NoteCard
+            entry={item}
+            onPress={() =>
+              router.push({ pathname: '/(tabs)/entries/[id]', params: { id: item.id } })
+            }
+          />
+        )}
         contentContainerStyle={styles.listContent}
-        onRefresh={refresh}
-        refreshing={loading}
+        automaticallyAdjustContentInsets={false}
+        contentInsetAdjustmentBehavior="never"
+        onRefresh={() => void pullToRefresh()}
+        refreshing={refreshing}
         onEndReached={() => {
           if (hasMore && !loading) void loadMore();
         }}
         ListFooterComponent={
           hasMore ? (
-            <Button title="Load more notes" disabled={loading} onPress={() => void loadMore()} />
+            <Button
+              title="Load more notes"
+              loading={entriesLoading && entries.length > 0}
+              disabled={loading}
+              onPress={() => void loadMore()}
+            />
           ) : null
         }
         ListEmptyComponent={
@@ -137,115 +96,37 @@ export default function EntriesListScreen() {
           </View>
         }
       />
-
-      {/* Floating Action Button */}
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Write a note"
-        style={[styles.fab, { backgroundColor: colors.primary }]}
+        style={[styles.fab, { backgroundColor: colors.primaryAction }]}
         onPress={() => router.push('/(tabs)/entries/new')}
       >
-        <FontAwesome name="plus" size={24} color="#fff" />
+        <FontAwesome name="plus" size={24} color={colors.onAction} />
       </TouchableOpacity>
     </View>
   );
 }
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  centered: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  listContent: {
-    padding: Spacing.md,
-    paddingBottom: 100,
-  },
-  card: {
-    borderRadius: BorderRadius.md,
-    padding: Spacing.md,
-    marginBottom: Spacing.sm,
-    borderWidth: 1,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.xs,
-  },
-  cardHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-  },
-  draftBadge: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.sm,
-  },
-  draftBadgeText: {
-    fontSize: FontSize.xs,
-    fontWeight: '600',
-  },
-  moodEmoji: {
-    fontSize: 18,
-  },
-  cardDate: {
-    fontSize: FontSize.xs,
-  },
-  cardTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: '600',
-    marginBottom: Spacing.xs,
-  },
-  cardPreview: {
-    fontSize: FontSize.sm,
-    lineHeight: 20,
-    marginBottom: Spacing.sm,
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  wordCount: {
-    fontSize: FontSize.xs,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  locationText: {
-    fontSize: FontSize.xs,
-    maxWidth: 150,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingTop: Spacing.xxl * 2,
-    gap: Spacing.md,
-  },
-  emptyText: {
-    fontSize: FontSize.md,
-    textAlign: 'center',
-  },
+  container: { flex: 1 },
+  centered: { alignItems: 'center', justifyContent: 'center' },
+  listContent: { padding: Spacing.md, paddingBottom: 100, gap: Spacing.sm },
+  error: { padding: Spacing.md, gap: Spacing.sm },
+  emptyContainer: { alignItems: 'center', padding: Spacing.xxl, gap: Spacing.md },
+  emptyText: { fontSize: FontSize.md, textAlign: 'center', lineHeight: 24 },
   fab: {
     position: 'absolute',
-    bottom: Spacing.lg,
     right: Spacing.lg,
+    bottom: Spacing.lg,
     width: 56,
     height: 56,
     borderRadius: 28,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.15,
     shadowRadius: 4,
   },
 });

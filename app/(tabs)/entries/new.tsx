@@ -9,13 +9,20 @@ import {
   TouchableOpacity,
   Alert,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   useColorScheme,
   ActionSheetIOS,
   ActivityIndicator,
   AppState,
+  Button as NativeButton,
 } from 'react-native';
+import {
+  KeyboardAwareScrollView,
+  KeyboardStickyView,
+  useKeyboardState,
+} from 'react-native-keyboard-controller';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Button, IconButton } from '../../../src/components/Button';
 import { useRouter, useNavigation, useLocalSearchParams } from 'expo-router';
 import { usePreventRemove } from '@react-navigation/native';
 import { uuid } from 'expo-modules-core';
@@ -115,6 +122,11 @@ function EntryEditor() {
   const exitAction = useRef<(() => void) | null>(null);
   const [locationSearchVisible, setLocationSearchVisible] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
+  const [footerHeight, setFooterHeight] = useState(72);
+  const keyboardVisible = useKeyboardState((state) => state.isVisible);
+  const footerInset = keyboardVisible ? Spacing.sm : Math.max(insets.bottom, Spacing.sm);
+  const keyboardFooterHeight = Math.max(0, footerHeight - footerInset);
 
   const navigateAway = useCallback(() => {
     const state = navigation.getState();
@@ -257,6 +269,7 @@ function EntryEditor() {
   if (!loadingEntry && !loadError && user && couple) snapshotRef.current = snapshot;
   const serialized = JSON.stringify(snapshot);
   const hasMemo = !!pendingVoiceMemo || (!!existingVoiceMemo && !deleteExistingVoiceMemo);
+  const mediaControlsDisabled = saving || !!pendingSave || staging || voiceMemo.isFinalizing;
   const hasContent = !!(
     title.trim() ||
     content.trim() ||
@@ -426,13 +439,25 @@ function EntryEditor() {
   useEffect(() => {
     navigation.setOptions({
       headerTitle: isEditMode ? 'Edit Entry' : 'New Entry',
-      headerLeft: () => (
-        <TouchableOpacity onPress={() => requestLeave(navigateAway)} disabled={saving}>
-          <Text style={{ color: colors.primary, fontSize: FontSize.md }}>Cancel</Text>
-        </TouchableOpacity>
-      ),
+      // UIKit centers the label within its own glass background on iOS.
+      headerLeft: () =>
+        Platform.OS === 'ios' ? (
+          <NativeButton
+            title="Cancel"
+            color={colors.text}
+            onPress={() => requestLeave(navigateAway)}
+            disabled={saving}
+          />
+        ) : (
+          <Button
+            title="Cancel"
+            compact
+            onPress={() => requestLeave(navigateAway)}
+            disabled={saving}
+          />
+        ),
     });
-  }, [navigation, isEditMode, requestLeave, navigateAway, saving, colors.primary]);
+  }, [navigation, isEditMode, requestLeave, navigateAway, saving, colors.text]);
 
   const handleSave = async (isDraft: boolean) => {
     if (savingRef.current) return;
@@ -600,9 +625,7 @@ function EntryEditor() {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Text style={{ color: colors.error }}>{loadError}</Text>
-        <TouchableOpacity onPress={() => setReload((n) => n + 1)} accessibilityRole="button">
-          <Text style={{ color: colors.primary }}>Retry loading entry</Text>
-        </TouchableOpacity>
+        <Button title="Retry loading entry" onPress={() => setReload((n) => n + 1)} />
       </View>
     );
   }
@@ -621,21 +644,23 @@ function EntryEditor() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {draftError && <Text style={{ color: colors.error }}>{draftError}</Text>}
       {pendingSave && !saving && (
         <Text style={{ color: colors.textSecondary }}>
           Your previous save needs a retry. Your words and attachments are kept.
         </Text>
       )}
-      <ScrollView
+      <KeyboardAwareScrollView
+        bottomOffset={keyboardFooterHeight + Spacing.md}
+        extraKeyboardSpace={keyboardFooterHeight}
+        disableScrollOnKeyboardHide
+        automaticallyAdjustContentInsets={false}
+        contentInsetAdjustmentBehavior="never"
         pointerEvents={saving || pendingSave || staging || voiceMemo.isFinalizing ? 'none' : 'auto'}
         ref={scrollViewRef}
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: footerHeight + Spacing.lg }]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
@@ -650,6 +675,8 @@ function EntryEditor() {
 
         {/* Date Selector - when the entry's event took place */}
         <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Choose entry date"
           style={styles.datePickerRow}
           onPress={() => setShowDatePicker(!showDatePicker)}
         >
@@ -683,6 +710,9 @@ function EntryEditor() {
           {Moods.map((m) => (
             <TouchableOpacity
               key={m.key}
+              accessibilityRole="button"
+              accessibilityLabel={m.label}
+              accessibilityState={{ selected: mood === m.key }}
               style={[
                 styles.moodChip,
                 {
@@ -712,15 +742,16 @@ function EntryEditor() {
             <Text style={[styles.locationDisplayText, { color: colors.text }]} numberOfLines={1}>
               {locationName}
             </Text>
-            <TouchableOpacity
+            <IconButton
+              label="Remove location"
+              icon="times"
+              disabled={mediaControlsDisabled}
               onPress={() => {
                 setLocationName(null);
                 setLocationLat(null);
                 setLocationLng(null);
               }}
-            >
-              <FontAwesome name="times" size={14} color={colors.textMuted} />
-            </TouchableOpacity>
+            />
           </View>
         ) : null}
 
@@ -732,31 +763,35 @@ function EntryEditor() {
             style={styles.imageScroll}
             contentContainerStyle={styles.imageScrollContent}
           >
-            {existingImages.map((img) => (
+            {existingImages.map((img, index) => (
               <View key={img.id} style={styles.imageThumbContainer}>
                 {img.signedUrl && (
                   <Image source={{ uri: img.signedUrl }} style={styles.imageThumb} />
                 )}
-                <TouchableOpacity
+                <IconButton
+                  label={`Remove attached photo ${index + 1}`}
+                  disabled={mediaControlsDisabled}
+                  icon="times"
+                  destructive
                   style={styles.imageRemoveButton}
                   onPress={() => {
                     setExistingImages((prev) => prev.filter((i) => i.id !== img.id));
                     setImagesToDelete((prev) => [...prev, img]);
                   }}
-                >
-                  <FontAwesome name="times-circle" size={20} color={colors.error} />
-                </TouchableOpacity>
+                />
               </View>
             ))}
             {pendingImages.map((asset, index) => (
               <View key={asset.draftId} style={styles.imageThumbContainer}>
                 <Image source={{ uri: asset.uri }} style={styles.imageThumb} />
-                <TouchableOpacity
+                <IconButton
+                  label={`Remove new photo ${index + 1}`}
+                  disabled={mediaControlsDisabled}
+                  icon="times"
+                  destructive
                   style={styles.imageRemoveButton}
                   onPress={() => setPendingImages((prev) => prev.filter((_, i) => i !== index))}
-                >
-                  <FontAwesome name="times-circle" size={20} color={colors.error} />
-                </TouchableOpacity>
+                />
               </View>
             ))}
           </ScrollView>
@@ -770,20 +805,16 @@ function EntryEditor() {
               { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
             ]}
           >
-            <TouchableOpacity
+            <IconButton
+              label={voiceMemo.isPlaying ? 'Pause voice memo' : 'Play voice memo'}
+              icon={voiceMemo.isPlaying ? 'pause' : 'play'}
               onPress={() =>
                 voiceMemo.isPlaying
                   ? voiceMemo.pauseAudio()
                   : voiceMemo.playAudio(existingVoiceMemo.signedUrl!)
               }
-              disabled={!existingVoiceMemo.signedUrl}
-            >
-              <FontAwesome
-                name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
-                size={32}
-                color={colors.primary}
-              />
-            </TouchableOpacity>
+              disabled={mediaControlsDisabled || !existingVoiceMemo.signedUrl}
+            />
             <View style={styles.voiceMemoInfo}>
               <Text style={[styles.voiceMemoLabel, { color: colors.text }]}>Voice Memo</Text>
               <Text style={[styles.voiceMemoDuration, { color: colors.textMuted }]}>
@@ -794,14 +825,16 @@ function EntryEditor() {
                 {formatDuration(existingVoiceMemo.duration_ms || 0)}
               </Text>
             </View>
-            <TouchableOpacity
+            <IconButton
+              label="Remove voice memo"
+              icon="trash"
+              destructive
+              disabled={mediaControlsDisabled}
               onPress={() => {
                 voiceMemo.stopPlayback();
                 setDeleteExistingVoiceMemo(true);
               }}
-            >
-              <FontAwesome name="times-circle" size={20} color={colors.error} />
-            </TouchableOpacity>
+            />
           </View>
         )}
 
@@ -813,19 +846,16 @@ function EntryEditor() {
               { backgroundColor: colors.surfaceSecondary, borderColor: colors.border },
             ]}
           >
-            <TouchableOpacity
+            <IconButton
+              label={voiceMemo.isPlaying ? 'Pause voice memo' : 'Play voice memo'}
+              icon={voiceMemo.isPlaying ? 'pause' : 'play'}
+              disabled={mediaControlsDisabled}
               onPress={() =>
                 voiceMemo.isPlaying
                   ? voiceMemo.pauseAudio()
                   : voiceMemo.playAudio(pendingVoiceMemo.uri)
               }
-            >
-              <FontAwesome
-                name={voiceMemo.isPlaying ? 'pause-circle' : 'play-circle'}
-                size={32}
-                color={colors.primary}
-              />
-            </TouchableOpacity>
+            />
             <View style={styles.voiceMemoInfo}>
               <Text style={[styles.voiceMemoLabel, { color: colors.text }]}>Voice Memo</Text>
               <Text style={[styles.voiceMemoDuration, { color: colors.textMuted }]}>
@@ -836,15 +866,17 @@ function EntryEditor() {
                 {formatDuration(pendingVoiceMemo.durationMs)}
               </Text>
             </View>
-            <TouchableOpacity
+            <IconButton
+              label="Remove voice memo"
+              icon="trash"
+              destructive
+              disabled={mediaControlsDisabled}
               onPress={() => {
                 voiceMemo.stopPlayback();
                 voiceMemo.resetRecording();
                 setPendingVoiceMemo(null);
               }}
-            >
-              <FontAwesome name="times-circle" size={20} color={colors.error} />
-            </TouchableOpacity>
+            />
           </View>
         )}
 
@@ -859,75 +891,99 @@ function EntryEditor() {
           textAlignVertical="top"
           scrollEnabled={false}
         />
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
-      {/* Recording Indicator */}
-      {voiceMemo.isRecording && (
+      <KeyboardStickyView
+        offset={{ closed: 0, opened: 0 }}
+        style={[
+          styles.stickyFooter,
+          { backgroundColor: colors.surface, paddingBottom: footerInset },
+        ]}
+        onLayout={(event) => setFooterHeight(event.nativeEvent.layout.height)}
+      >
+        {/* Recording Indicator */}
+        {voiceMemo.isRecording && (
+          <View
+            style={[
+              styles.recordingBar,
+              { backgroundColor: colors.error + '10', borderTopColor: colors.border },
+            ]}
+          >
+            <View style={[styles.recordingDot, { backgroundColor: colors.error }]} />
+            <Text style={[styles.recordingText, { color: colors.error }]}>
+              {formatDuration(voiceMemo.recordingDurationSecs * 1000)}
+            </Text>
+            <IconButton
+              label="Stop recording"
+              icon="stop"
+              destructive
+              onPress={voiceMemo.stopRecording}
+            />
+          </View>
+        )}
+
+        {/* Toolbar */}
         <View
           style={[
-            styles.recordingBar,
-            { backgroundColor: colors.error + '10', borderTopColor: colors.border },
+            styles.toolbar,
+            { backgroundColor: colors.surface, borderTopColor: colors.border },
           ]}
         >
-          <View style={[styles.recordingDot, { backgroundColor: colors.error }]} />
-          <Text style={[styles.recordingText, { color: colors.error }]}>
-            {formatDuration(voiceMemo.recordingDurationSecs * 1000)}
-          </Text>
-          <TouchableOpacity onPress={voiceMemo.stopRecording}>
-            <FontAwesome name="stop-circle" size={24} color={colors.error} />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Toolbar */}
-      <View
-        style={[styles.toolbar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}
-      >
-        <View
-          style={styles.toolbarLeft}
-          pointerEvents={
-            saving || pendingSave || staging || voiceMemo.isFinalizing ? 'none' : 'auto'
-          }
-        >
-          <TouchableOpacity style={styles.toolbarButton} onPress={handleAddImage}>
-            <FontAwesome name="image" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.toolbarButton} onPress={handleAddLocation}>
-            <FontAwesome
-              name="map-marker"
-              size={20}
-              color={locationName ? colors.primary : colors.textSecondary}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.toolbarButton}
-            onPress={
-              hasMemo
-                ? undefined
-                : voiceMemo.isRecording
-                  ? voiceMemo.stopRecording
-                  : voiceMemo.startRecording
+          <View
+            style={styles.toolbarLeft}
+            pointerEvents={
+              saving || pendingSave || staging || voiceMemo.isFinalizing ? 'none' : 'auto'
             }
-            disabled={hasMemo}
           >
-            <FontAwesome
-              name="microphone"
-              size={20}
-              color={
-                voiceMemo.isRecording
-                  ? colors.error
-                  : hasMemo
-                    ? colors.primary
-                    : colors.textSecondary
-              }
+            <IconButton
+              label="Add photo"
+              icon="image"
+              disabled={mediaControlsDisabled}
+              onPress={handleAddImage}
             />
-          </TouchableOpacity>
-        </View>
-        <View style={styles.toolbarRight}>
-          {!isEditMode && (
-            <TouchableOpacity
-              style={[styles.draftButton, { borderColor: colors.border }]}
-              onPress={() => handleSave(true)}
+            <IconButton
+              label="Add location"
+              icon="map-marker"
+              disabled={mediaControlsDisabled}
+              onPress={handleAddLocation}
+            />
+            <IconButton
+              label={voiceMemo.isRecording ? 'Stop recording' : 'Record voice memo'}
+              icon={voiceMemo.isRecording ? 'stop' : 'microphone'}
+              onPress={voiceMemo.isRecording ? voiceMemo.stopRecording : voiceMemo.startRecording}
+              disabled={hasMemo || mediaControlsDisabled}
+            />
+          </View>
+          <View style={styles.toolbarRight}>
+            {!isEditMode && (
+              <Button
+                title="Save Draft"
+                compact
+                onPress={() => handleSave(true)}
+                disabled={
+                  saving ||
+                  loadingEntry ||
+                  !!loadError ||
+                  voiceMemo.isRecording ||
+                  voiceMemo.isFinalizing ||
+                  staging
+                }
+              />
+            )}
+            <Button
+              title={
+                saving
+                  ? 'Saving…'
+                  : pendingSave
+                    ? 'Retry Save'
+                    : isEditMode
+                      ? 'Save Changes'
+                      : 'Publish'
+              }
+              variant="primary"
+              compact
+              loading={saving}
+              onPress={() => handleSave(false)}
               disabled={
                 saving ||
                 loadingEntry ||
@@ -936,36 +992,10 @@ function EntryEditor() {
                 voiceMemo.isFinalizing ||
                 staging
               }
-            >
-              <Text style={[styles.draftButtonText, { color: colors.textSecondary }]}>
-                Save Draft
-              </Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[styles.publishButton, { backgroundColor: colors.primary }]}
-            onPress={() => handleSave(false)}
-            disabled={
-              saving ||
-              loadingEntry ||
-              !!loadError ||
-              voiceMemo.isRecording ||
-              voiceMemo.isFinalizing ||
-              staging
-            }
-          >
-            <Text style={styles.publishButtonText}>
-              {saving
-                ? 'Saving...'
-                : pendingSave
-                  ? 'Retry Save'
-                  : isEditMode
-                    ? 'Save Changes'
-                    : 'Publish'}
-            </Text>
-          </TouchableOpacity>
+            />
+          </View>
         </View>
-      </View>
+      </KeyboardStickyView>
 
       {/* Location Search Modal */}
       <LocationSheet
@@ -978,7 +1008,7 @@ function EntryEditor() {
           setLocationSearchVisible(false);
         }}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -1001,6 +1031,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   datePickerRow: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
@@ -1017,6 +1048,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   moodChip: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -1059,10 +1091,8 @@ const styles = StyleSheet.create({
   },
   imageRemoveButton: {
     position: 'absolute',
-    top: -6,
-    right: -6,
-    backgroundColor: '#fff',
-    borderRadius: 10,
+    top: 0,
+    right: 0,
   },
   contentInput: {
     fontSize: FontSize.md,
@@ -1107,43 +1137,23 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     marginTop: 2,
   },
+  stickyFooter: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   toolbar: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xl,
+    paddingVertical: Spacing.sm,
     borderTopWidth: 1,
   },
   toolbarLeft: {
     flexDirection: 'row',
-    gap: Spacing.md,
-  },
-  toolbarButton: {
-    padding: Spacing.sm,
+    gap: Spacing.xs,
   },
   toolbarRight: {
     flexDirection: 'row',
     gap: Spacing.sm,
-  },
-  draftButton: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-  },
-  draftButtonText: {
-    fontSize: FontSize.sm,
-    fontWeight: '500',
-  },
-  publishButton: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.sm,
-  },
-  publishButtonText: {
-    color: '#fff',
-    fontSize: FontSize.sm,
-    fontWeight: '600',
   },
 });
