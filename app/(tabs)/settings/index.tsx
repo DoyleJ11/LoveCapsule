@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,15 @@ import {
   SafeAreaView,
   Switch,
 } from 'react-native';
+import { uuid } from 'expo-modules-core';
+import { useFocusEffect } from '@react-navigation/native';
+import { AnnualScheduleEditor } from '../../../src/features/reveals/AnnualScheduleEditor';
+import { ScheduleFields } from '../../../src/features/reveals/ScheduleFields';
+import {
+  calendarDate,
+  validTimezone,
+  formatRevealInstant,
+} from '../../../src/features/reveals/time';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
@@ -29,8 +38,6 @@ import {
   formatEntryDate,
   formatCheckpointFrequency,
   formatCheckpointDescription,
-  getNextCheckpointDate,
-  formatNextCheckpointDate,
 } from '../../../src/lib/date-utils';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, FontSize, BorderRadius } from '../../../src/constants/theme';
@@ -41,7 +48,7 @@ const FREQUENCY_OPTIONS: { value: CheckpointFrequency; label: string }[] = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'quarterly', label: 'Quarterly' },
   { value: 'semi_annual', label: 'Every 6 months' },
-  { value: 'specific_date', label: 'Specific date' },
+  { value: 'specific_date', label: 'One-time date' },
 ];
 
 const DAY_OPTIONS = Array.from({ length: 28 }, (_, i) => i + 1);
@@ -53,7 +60,8 @@ export default function SettingsScreen() {
     partner,
     createCouple,
     joinCouple,
-    setAnniversaryDate,
+    overview,
+    refresh,
     unpairCouple,
     loading,
     profileAvatarUrl: avatarUrl,
@@ -74,16 +82,19 @@ export default function SettingsScreen() {
 
   const [inviteInput, setInviteInput] = useState('');
   const [joiningLoading, setJoiningLoading] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(profile?.display_name || '');
   // Checkpoint modal state
+  const checkpointCreateId = useRef<string | null>(null);
+  const [checkpointModalScope, setCheckpointModalScope] = useState<string>();
   const [showCheckpointModal, setShowCheckpointModal] = useState(false);
   const [editingCheckpoint, setEditingCheckpoint] = useState<CheckpointConfig | null>(null);
   const [checkpointFrequency, setCheckpointFrequency] = useState<CheckpointFrequency>('monthly');
   const [checkpointDay, setCheckpointDay] = useState(15);
   const [checkpointMonths, setCheckpointMonths] = useState<number[]>([3, 6, 9, 12]);
   const [checkpointSpecificDate, setCheckpointSpecificDate] = useState<Date>(new Date());
+  const [checkpointTime, setCheckpointTime] = useState('00:00');
+  const [checkpointZone, setCheckpointZone] = useState('UTC');
   const [checkpointLabel, setCheckpointLabel] = useState('');
   const [checkpointActive, setCheckpointActive] = useState(true);
   const [showCheckpointDatePicker, setShowCheckpointDatePicker] = useState(false);
@@ -93,9 +104,20 @@ export default function SettingsScreen() {
     if (couple?.id && partner) {
       loadConfigs(couple.id);
     }
-  }, [couple?.id, partner, loadConfigs]);
+  }, [couple?.id, partner, loadConfigs, overview?.server_now]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refresh();
+    }, [refresh])
+  );
 
   const openCheckpointModal = (config?: CheckpointConfig) => {
+    setCheckpointModalScope(`${user?.id}:${couple?.id}`);
+    setShowCheckpointDatePicker(false);
+    checkpointCreateId.current = config?.id ?? uuid.v4();
+    setCheckpointTime(config?.reveal_time ?? couple?.reveal_time ?? '00:00');
+    setCheckpointZone(config?.timezone ?? couple?.reveal_timezone ?? 'UTC');
     if (config) {
       setEditingCheckpoint(config);
       setCheckpointFrequency(config.frequency);
@@ -122,7 +144,10 @@ export default function SettingsScreen() {
     if (!couple) return;
 
     try {
+      if (!validTimezone(checkpointZone.trim())) throw new Error('Choose a valid IANA timezone.');
       const configData = {
+        id: checkpointCreateId.current!,
+        version: editingCheckpoint?.version ?? undefined,
         couple_id: couple.id,
         frequency: checkpointFrequency,
         day_of_month: checkpointFrequency !== 'specific_date' ? checkpointDay : null,
@@ -133,10 +158,10 @@ export default function SettingsScreen() {
               ? [6, 12]
               : null,
         specific_date:
-          checkpointFrequency === 'specific_date'
-            ? checkpointSpecificDate.toISOString().split('T')[0]
-            : null,
+          checkpointFrequency === 'specific_date' ? calendarDate(checkpointSpecificDate) : null,
         label: checkpointLabel.trim() || null,
+        reveal_time: checkpointTime,
+        timezone: checkpointZone.trim(),
         is_active: checkpointActive,
       };
 
@@ -282,18 +307,6 @@ export default function SettingsScreen() {
       });
     } catch (e) {
       // User cancelled share
-    }
-  };
-
-  const handleDateChange = async (_: any, selectedDate?: Date) => {
-    setShowDatePicker(Platform.OS === 'ios');
-    if (selectedDate) {
-      const dateStr = selectedDate.toISOString().split('T')[0];
-      try {
-        await setAnniversaryDate(dateStr);
-      } catch (e: any) {
-        Alert.alert('Error', e.message);
-      }
     }
   };
 
@@ -546,35 +559,7 @@ export default function SettingsScreen() {
         <View
           style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}
         >
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Anniversary Date</Text>
-          {couple.anniversary_date ? (
-            <Text style={[styles.dateDisplay, { color: colors.text }]}>
-              {formatEntryDate(couple.anniversary_date)}
-            </Text>
-          ) : (
-            <Text style={[styles.infoText, { color: colors.textSecondary }]}>No date set yet</Text>
-          )}
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: colors.secondary }]}
-            onPress={() => setShowDatePicker(true)}
-          >
-            <FontAwesome name="calendar" size={16} color="#fff" />
-            <Text style={styles.actionButtonText}>
-              {couple.anniversary_date ? 'Change Date' : 'Set Anniversary Date'}
-            </Text>
-          </TouchableOpacity>
-          {showDatePicker && (
-            <DateTimePicker
-              value={
-                couple.anniversary_date
-                  ? new Date(couple.anniversary_date + 'T00:00:00')
-                  : new Date()
-              }
-              mode="date"
-              display="spinner"
-              onChange={handleDateChange}
-            />
-          )}
+          <AnnualScheduleEditor />
         </View>
       )}
 
@@ -625,7 +610,9 @@ export default function SettingsScreen() {
                       </Text>
                       <Text style={[styles.checkpointItemSubtitle, { color: colors.textMuted }]}>
                         {formatCheckpointFrequency(config.frequency, config.specific_date)}
+                        {` · ${config.reveal_time?.slice(0, 5) ?? '00:00'} · ${config.timezone ?? 'UTC'}`}
                         {!config.is_active && ' (Paused)'}
+                        {config.schedule_error && ` · ${config.schedule_error}`}
                       </Text>
                     </View>
                   </View>
@@ -650,7 +637,13 @@ export default function SettingsScreen() {
 
           {checkpointConfigs.length > 0 && (
             <Text style={[styles.nextCheckpointText, { color: colors.textSecondary }]}>
-              Next checkpoint: {formatNextCheckpointDate(getNextCheckpointDate(checkpointConfigs))}
+              Next checkpoint:{' '}
+              {overview?.checkpoints[0]
+                ? formatRevealInstant(
+                    overview.checkpoints[0].due_at,
+                    overview.checkpoints[0].timezone
+                  )
+                : 'No pending checkpoint'}
             </Text>
           )}
         </View>
@@ -658,7 +651,7 @@ export default function SettingsScreen() {
 
       {/* Checkpoint Config Modal */}
       <Modal
-        visible={showCheckpointModal}
+        visible={showCheckpointModal && checkpointModalScope === `${user?.id}:${couple?.id}`}
         animationType="slide"
         presentationStyle="pageSheet"
         onRequestClose={() => setShowCheckpointModal(false)}
@@ -678,7 +671,11 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentInner}>
+          <ScrollView
+            pointerEvents={checkpointLoading ? 'none' : 'auto'}
+            style={styles.modalContent}
+            contentContainerStyle={styles.modalContentInner}
+          >
             {/* Label */}
             <View style={styles.formGroup}>
               <Text style={[styles.formLabel, { color: colors.text }]}>Label (optional)</Text>
@@ -780,7 +777,7 @@ export default function SettingsScreen() {
                 >
                   <FontAwesome name="calendar" size={16} color={colors.textSecondary} />
                   <Text style={[styles.dateButtonText, { color: colors.text }]}>
-                    {formatEntryDate(checkpointSpecificDate.toISOString().split('T')[0])}
+                    {formatEntryDate(calendarDate(checkpointSpecificDate))}
                   </Text>
                 </TouchableOpacity>
                 {showCheckpointDatePicker && (
@@ -797,6 +794,19 @@ export default function SettingsScreen() {
               </View>
             )}
 
+            <ScheduleFields
+              time={checkpointTime}
+              zone={checkpointZone}
+              onTime={setCheckpointTime}
+              onZone={setCheckpointZone}
+            />
+            <Text style={{ color: colors.textSecondary, marginVertical: Spacing.md }}>
+              {checkpointFrequency === 'specific_date'
+                ? `One time on ${calendarDate(checkpointSpecificDate)}`
+                : 'Repeats on the selected days'}{' '}
+              at {checkpointTime.slice(0, 5)} · {checkpointZone}. Missed reveals stay available.
+              Changes affect future occurrences; already due or opened reveals stay saved.
+            </Text>
             {/* Active Toggle */}
             <View style={[styles.formGroup, styles.toggleRow]}>
               <View>
@@ -804,7 +814,7 @@ export default function SettingsScreen() {
                   Active
                 </Text>
                 <Text style={[styles.formHint, { color: colors.textMuted }]}>
-                  Pause to temporarily disable
+                  Pause future occurrences; due reveals stay saved
                 </Text>
               </View>
               <Switch

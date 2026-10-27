@@ -38,6 +38,11 @@ class RevealGuardrails(unittest.TestCase):
         ('{E[2]}','{COUPLE}','{B}',false,'2026-08-01',null,null),
         ('{E[3]}','{COUPLE}','{B}',true,'2026-02-01',null,null),
         ('{E[4]}','{OTHER}','{D}',false,'2026-02-01',null,null);
+        DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid='entries'::regclass AND attname='published_at') THEN
+          ALTER TABLE entries DISABLE TRIGGER stamp_publication;
+          EXECUTE 'UPDATE entries SET published_at = entry_date::timestamp AT TIME ZONE ''UTC'' WHERE NOT is_draft';
+          ALTER TABLE entries ENABLE TRIGGER stamp_publication;
+        END IF; END $$;
         INSERT INTO checkpoint_configs(couple_id,frequency,specific_date) VALUES ('{COUPLE}','specific_date',(now() AT TIME ZONE 'UTC')::date);
         INSERT INTO media(entry_id,author_id,storage_path,media_type,mime_type)
         SELECT id,author_id,author_id||'/'||id||'/photo.jpg','image','image/jpeg' FROM entries;

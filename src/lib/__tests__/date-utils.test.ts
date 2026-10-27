@@ -36,10 +36,7 @@ describe('date-utils', () => {
 
     it('returns correct days when anniversary is in the future this year', () => {
       mockDate('2024-06-01');
-      // date-fns differenceInDays can be 13 or 14 depending on time of day
-      const days = getDaysUntilAnniversary('2020-06-15');
-      expect(days).toBeGreaterThanOrEqual(13);
-      expect(days).toBeLessThanOrEqual(14);
+      expect(getDaysUntilAnniversary('2020-06-15')).toBe(14);
     });
 
     it('returns days until next year when anniversary already passed', () => {
@@ -52,10 +49,7 @@ describe('date-utils', () => {
 
     it('handles leap year anniversaries', () => {
       mockDate('2024-02-28');
-      // Feb 28 to Feb 29 (leap year) - can be 0 or 1 depending on time calculation
-      const days = getDaysUntilAnniversary('2020-02-29');
-      expect(days).toBeGreaterThanOrEqual(0);
-      expect(days).toBeLessThanOrEqual(1);
+      expect(getDaysUntilAnniversary('2020-02-29')).toBe(1);
     });
   });
 
@@ -343,7 +337,7 @@ describe('date-utils', () => {
       expect(result!.getDate()).toBe(8);
     });
 
-    it('finds specific date checkpoint (next year)', () => {
+    it('keeps a missed one-time checkpoint instead of inventing a yearly recurrence', () => {
       mockDate('2024-04-01');
       const specificConfig = {
         ...baseConfig,
@@ -353,7 +347,7 @@ describe('date-utils', () => {
       };
       const result = getNextCheckpointDate([specificConfig]);
       expect(result).not.toBeNull();
-      expect(result!.getFullYear()).toBe(2025);
+      expect(result!.getFullYear()).toBe(2024);
       expect(result!.getMonth()).toBe(2); // March (0-indexed)
       expect(result!.getDate()).toBe(8);
     });
@@ -396,5 +390,24 @@ describe('date-utils', () => {
       const farAway = new Date('2024-07-20T12:00:00');
       expect(formatNextCheckpointDate(farAway)).toBe('Jul 20');
     });
+  });
+});
+
+describe('calendar boundary regressions', () => {
+  afterEach(restoreDate);
+  it('counts tomorrow as one calendar day at 11:59pm', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 5, 14, 23, 59));
+    expect(getDaysUntilAnniversary('2020-06-15')).toBe(1);
+    expect(formatNextCheckpointDate(new Date(2026, 5, 15))).toBe('Tomorrow');
+  });
+  it('honors the start year and March 1 for non-leap years', () => {
+    mockDate('2026-02-28');
+    expect(isAnniversaryReady('2030-02-01', null)).toBe(false);
+    expect(getDaysUntilAnniversary('2024-02-29')).toBe(1);
+    expect(isAnniversaryReady('2024-02-29', null)).toBe(false);
+    mockDate('2026-03-01');
+    expect(isAnniversaryReady('2024-02-29', null)).toBe(true);
+    expect(formatNextCheckpointDate(new Date(2026, 1, 28))).toBe('Ready to open');
   });
 });
