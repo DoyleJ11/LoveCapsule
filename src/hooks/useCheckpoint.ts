@@ -1,8 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import type {
   CheckpointConfig,
-  CheckpointFrequency,
   CheckpointEntryResponse,
   CheckpointHistoryItem,
   CheckpointTodayResponse,
@@ -32,6 +31,7 @@ interface UseCheckpointReturn {
 }
 
 export function useCheckpoint(): UseCheckpointReturn {
+  const inFlight = useRef(false);
   const [configs, setConfigs] = useState<CheckpointConfig[]>([]);
   const [isCheckpointDay, setIsCheckpointDay] = useState(false);
   const [todaysCheckpoints, setTodaysCheckpoints] = useState<
@@ -77,6 +77,11 @@ export function useCheckpoint(): UseCheckpointReturn {
   }, []);
 
   const revealEntry = useCallback(async (coupleId: string, configId?: string): Promise<boolean> => {
+    if (inFlight.current) return false;
+    inFlight.current = true;
+    setCheckpointEntry(null);
+    setAlreadyRevealed(false);
+    setNoEntriesRemaining(false);
     setLoading(true);
     setError(null);
 
@@ -88,6 +93,7 @@ export function useCheckpoint(): UseCheckpointReturn {
 
       if (revealError) throw revealError;
 
+      if (!data) throw new Error('Reveal confirmation was not received. Please retry.');
       const response = data as CheckpointEntryResponse;
 
       if (response.error) {
@@ -98,11 +104,12 @@ export function useCheckpoint(): UseCheckpointReturn {
       setAlreadyRevealed(response.already_revealed);
       setNoEntriesRemaining(response.no_entries);
 
-      return !response.no_entries;
+      return true;
     } catch (e: any) {
       setError(e.message);
       return false;
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   }, []);
